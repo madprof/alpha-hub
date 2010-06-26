@@ -14,12 +14,10 @@ model.py - data model
   interface if necessary
 
 - string lengths are somewhat contentious between database
-  systems; for example MySQL apparently doesn't like variable
-  length strings quite as much as SQLite; so we use fixed
-  length strings all over, but we give them custom names,
-  for example we define Password = String(128) because we
-  use SHA-512 for passwords and need that length string to
-  store them; TODO: does this really work?
+  systems; MySQL doesn't seem to like variable-length Text
+  quite as much as SQLite; so we use fixed-length strings,
+  but we give them custom names like Tiny and Password for
+  consistency
 
 - related to string lengths, how much space do we need to
   store network addresses? as long as we stay "numeric"
@@ -29,23 +27,32 @@ model.py - data model
   a CIDR we need 4 more, e.g. "/101"; for a total of 49 or
   so characters; domain names are a bit more contentious
   again since very few people seem sure about the exact
-  limits; we use Address = String(256) for now and we'll
-  see if we ever need more
+  limits; we use the custom Address type for now and if we
+  ever fail to store something important we'll revise it
 
 - we never delete anything; at most we mark things inactive
+
+- it's a major pain to get sqlalchemy to do something like
+  autoincrement on non-primary keys portably across databases;
+  the easiest workaround seems to be to make the ids primary
+  keys even though we didn't intend them to be used as such
+  for some tables; then add unique and index constraints on
+  the composite keys we wanted to be primary originally; and
+  we still have to use Sequence() to make some DBs happy...
 """
 
 from datetime import datetime
-from hashlib import sha512
+from hashlib import sha256
 
 from sqlalchemy import Column, Sequence, ForeignKey
 from sqlalchemy import Boolean, Integer, String, Text, DateTime
 from sqlalchemy.orm import relationship, backref
+from sqlalchemy.schema import UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 
 GUID = Tiny = String(32)
-Short = String(64)
-Password = Medium = String(128)
+Password = Short = String(64)
+Medium = String(128)
 Address = Long = String(256)
 
 Base = declarative_base()
@@ -55,7 +62,11 @@ class Player(Base):
     Player observed on a game server.
 
     - more information is available but recording the minimum should be
-      enough for now
+      enough; there are lots of these after all...
+
+    - a more normalized approach would be to consider ip address the
+      central focus and then foreign key that to separate tables for
+      name, guid, and server; probably overkill, so we de-normalize
 
     - the "bad names" feature can be implemented without keeping score
       of how often someone was warned, but maybe we should add a field
@@ -65,13 +76,14 @@ class Player(Base):
       userinfo change - but then we'd have no record of them...
     """
     __tablename__ = 'players'
+    __table_args__ = (UniqueConstraint('name', 'address', 'guid', 'server'), {})
 
-    id = Column(Integer, Sequence('players_ids'), nullable=False, unique=True)
-    name = Column(Tiny, primary_key=True, nullable=False,
-                  doc="ioq3 player name 20 chars")
-    address = Column(Address, primary_key=True, doc="ip address")
-    guid = Column(GUID, primary_key=True, doc="ioq3 GUID 32 chars")
-    server = Column(Address, primary_key=True, doc="ip address")
+    id = Column(Integer, Sequence('players_ids'), primary_key=True,
+                autoincrement=True, nullable=False, unique=True)
+    name = Column(Tiny, nullable=False, doc="ioq3 player name 20 chars")
+    address = Column(Address, nullable=False, doc="ip address")
+    guid = Column(GUID, nullable=False, doc="ioq3 GUID 32 chars")
+    server = Column(Address, nullable=False, doc="ip address")
     first = Column(DateTime, nullable=False, doc="on insert")
     last = Column(DateTime, nullable=False, doc="on insert and update")
 
@@ -96,24 +108,27 @@ class User(Base):
     """
     __tablename__ = 'users'
 
-    id = Column(Integer, Sequence('users_ids'), nullable=False, unique=True)
-    login = Column(Tiny, primary_key=True)
-    password = Column(Password, nullable=False, doc="sha512 hash")
+    id = Column(Integer, Sequence('users_ids'), primary_key=True,
+                autoincrement=True, nullable=False, unique=True)
+    login = Column(Tiny, nullable=False, unique=True)
+    password = Column(Password, nullable=False, doc="hash")
     name = Column(Short, nullable=False, doc="full name")
     email = Column(Address, nullable=False, unique=True)
     activated = Column(Boolean, nullable=False, doc="activated, email valid")
     disabled = Column(Boolean, nullable=False, doc="disabled, can't login")
-    first = Column(DateTime, nullable=True)
-    last = Column(DateTime, nullable=True)
+    created = Column(DateTime, nullable=False, doc="on insert")
+    first = Column(DateTime, nullable=True, doc="first login")
+    last = Column(DateTime, nullable=True, doc="last login")
 
     def __init__(self, login, password, name, email, activated=False,
                  disabled=False):
         self.login = login
-        self.password = sha512(password).hexdigest()
+        self.password = sha256(password).hexdigest()
         self.name = name
         self.email = email
         self.activated = activated
         self.disabled = disabled
+        self.created = datetime.utcnow()
 
     def __repr__(self):
         return "User<login: %s; name: %s; email: %s; activated: %s>" % (
@@ -138,12 +153,16 @@ class GameAdmin(Base):
     to keep hanging around, correct?
     """
     __tablename__ = 'game_admins'
+    __table_args__ = (UniqueConstraint('address', 'guid', 'password'), {})
 
-    id = Column(Integer, Sequence('game_admins_ids'), primary_key=True)
+    id = Column(Integer, Sequence('game_admins_ids'), primary_key=True,
+                autoincrement=True, nullable=False, unique=True)
     address = Column(Address, nullable=False, doc="ip address")
-    guid = Column(GUID, primary_key=True, doc="ioq3 GUID 32 chars")
-    password = Column(Password, nullable=False, doc="sha512 hash")
-    active = Column(Boolean, nullable=False)
+    guid = Column(GUID, nullable=False, doc="ioq3 GUID 32 chars")
+    password = Column(Password, nullable=False, doc="hash")
+    created = Column(DateTime, nullable=False, doc="on insert")
+    first = Column(DateTime, nullable=True, doc="first used in game")
+    last = Column(DateTime, nullable=True, doc="last used in game")
 
     user_id = Column(Integer, ForeignKey('users.id'))
 
@@ -157,12 +176,12 @@ class GameAdmin(Base):
     def __init__(self, address, guid, password, active=False):
         self.address = address
         self.guid = guid
-        self.password = sha512(password).hexdigest()
-        self.active = active
+        self.password = sha256(password).hexdigest()
+        self.created = datetime.utcnow()
 
     def __repr__(self):
-        return "GameAdmin<user_name: %s; address: %s; guid: %s; active: %s>" % (
-            self.user.name, self.address, self.guid, self.active
+        return "GameAdmin<user_name: %s; address: %s; guid: %s>" % (
+            self.user.name, self.address, self.guid
         )
 
 class Server(Base):
@@ -170,23 +189,29 @@ class Server(Base):
     Game server configured by administrator.
 
     TODO: server guid? really? and how?
-    TODO: should be let users register servers? :-D
+    TODO: should we let users register servers? :-D
     """
     __tablename__ = 'servers'
+    __table_args__ = (UniqueConstraint('guid', 'address'), {})
 
-    id = Column(Integer, Sequence('servers_ids'), nullable=False, unique=True)
-    guid = Column(GUID, primary_key=True)
-    address = Column(Address, primary_key=True)
+    id = Column(Integer, Sequence('servers_ids'), primary_key=True,
+                autoincrement=True, nullable=False, unique=True)
+
+    guid = Column(GUID, nullable=False)
+    address = Column(Address, nullable=False)
+
     rcon = Column(Short, nullable=False)
     active = Column(Boolean, nullable=False)
-    first = Column(DateTime, nullable=True)
-    last = Column(DateTime, nullable=True)
+    created = Column(DateTime, nullable=False, doc="on insert")
+    first = Column(DateTime, nullable=True, doc="first userinfo")
+    last = Column(DateTime, nullable=True, doc="last userinfo")
 
     def __init__(self, guid, address, rcon, active=False):
         self.guid = guid
         self.address = address
         self.rcon = rcon
         self.active = active
+        self.created = datetime.utcnow()
 
     def __repr__(self):
         return "Server<guid: %s; address: %s; active: %s>" % (
@@ -194,20 +219,31 @@ class Server(Base):
         )
 
 if __name__ == "__main__":
+    from sqlalchemy import create_engine
+    engine = create_engine('sqlite:///test.db')
+    Base.metadata.create_all(engine)
+    from sqlalchemy.orm import sessionmaker
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
     p = Player("|ALPHA| CCCP", "1.2.3.4", "CCCPCCCPCCCPCCCPCCCPCCCPCCCPCCCP",
                "3.4.5.6:27964")
+    session.add(p)
     print p
     p2 = Player("a", "b", "c", "d")
+    session.add(p2)
     print p2
     print p
 
     u = User("mad", "gagagagaga", "|ALPHA| Mad Professor",
              "alpha.mad.professor@gmail.com", True)
+    session.add(u)
     print u
     print u.game_admins
 
     ga = GameAdmin("5.3.1.9", "MADMADMADMADMADMADMADMADMADMADMA",
                    "untzuntzuntzuntz", False)
+    session.add(ga)
     u.game_admins.append(ga)
     print u
     print u.game_admins
@@ -216,4 +252,7 @@ if __name__ == "__main__":
 
     s = Server("SERVERSERVERserverSERVERserverSE", "23.54.12.95",
                "illnevertellofcoursebutheyyourefreetotry", True)
+    session.add(s)
     print s
+
+    session.commit()
