@@ -22,8 +22,9 @@ model.py - data model
 from datetime import datetime
 from hashlib import sha512
 
-from sqlalchemy import Column, Sequence
+from sqlalchemy import Column, Sequence, ForeignKey
 from sqlalchemy import Boolean, Integer, String, Text, DateTime
+from sqlalchemy.orm import relationship, backref
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
@@ -34,8 +35,7 @@ class Player(Base):
     """
     __tablename__ = 'players'
 
-    id = Column(Integer, Sequence('players_id_sequence'), nullable=False,
-                unique=True)
+    id = Column(Integer, Sequence('players_ids'), nullable=False, unique=True)
     name = Column(String(64), primary_key=True)
     address = Column(Text, primary_key=True)
     guid = Column(String(64), primary_key=True)
@@ -60,11 +60,11 @@ class User(Base):
     User registered with the hub.
 
     TODO: activating an account to verify email versus disabling an account
+    TODO: only admins? only members? everybody?
     """
     __tablename__ = 'users'
 
-    id = Column(Integer, Sequence('users_id_sequence'), nullable=False,
-                unique=True)
+    id = Column(Integer, Sequence('users_ids'), nullable=False, unique=True)
     login = Column(String(64), primary_key=True)
     password = Column(String(128), nullable=False)
     name = Column(String(64), nullable=False)
@@ -85,6 +85,51 @@ class User(Base):
             self.login, self.name, self.email, self.active
         )
 
+class GameAdmin(Base):
+    """
+    Information for users who are game server admins.
+
+    TODO: admins must configure clients for constant guids
+
+    TODO: the "correct" design would be user --1:N--> ip --1:N--> guid
+    to allow, for example, two admins with separate installs behind
+    the same router and hence with the same ip; that avoids duplicating
+    the ip, but I don't really think we need to care; do we? what we
+    have here is much simpler...
+
+    TODO: do we have cascade in the right place here? we usually
+    don't delete anything anyway, but IF for some reason a user
+    actually gets deleted, we wouldn't want useless game_admins
+    to keep hanging around, correct?
+    """
+    __tablename__ = 'game_admins'
+
+    id = Column(Integer, Sequence('game_admins_ids'), primary_key=True)
+    address = Column(Text, nullable=False)
+    guid = Column(String(64), nullable=False)
+    password = Column(String(128), nullable=False)
+    active = Column(Boolean, nullable=False)
+
+    user_id = Column(Integer, ForeignKey('users.id'))
+
+    user = relationship(
+        User,
+        backref=backref('game_admins', order_by=id),
+        cascade="all, delete, delete-orphan",
+        single_parent=True
+    )
+
+    def __init__(self, address, guid, password, active=False):
+        self.address = address
+        self.guid = guid
+        self.password = sha512(password).hexdigest()
+        self.active = active
+
+    def __repr__(self):
+        return "GameAdmin<user_name: %s; address: %s; guid: %s; active: %s>" % (
+            self.user.name, self.address, self.guid, self.active
+        )
+
 class Server(Base):
     """
     Game server configured by administrator.
@@ -94,8 +139,7 @@ class Server(Base):
     """
     __tablename__ = 'servers'
 
-    id = Column(Integer, Sequence('servers_id_sequence'), nullable=False,
-                unique=True)
+    id = Column(Integer, Sequence('servers_ids'), nullable=False, unique=True)
     guid = Column(String(64), primary_key=True)
     address = Column(Text, primary_key=True)
     rcon = Column(String(64), nullable=False)
@@ -113,3 +157,25 @@ class Server(Base):
         return "Server<guid: %s; address: %s; active: %s>" % (
             self.guid, self.address, self.active
         )
+
+if __name__ == "__main__":
+    p = Player("|ALPHA| CCCP", "1.2.3.4", "CCCPCCCPCCCPCCCPCCCPCCCPCCCPCCCP",
+               "3.4.5.6:27964")
+    print p
+
+    u = User("mad", "gagagagaga", "|ALPHA| Mad Professor",
+             "alpha.mad.professor@gmail.com", True)
+    print u
+    print u.game_admins
+
+    ga = GameAdmin("5.3.1.9", "MADMADMADMADMADMADMADMADMADMADMA",
+                   "untzuntzuntzuntz", False)
+    u.game_admins.append(ga)
+    print u
+    print u.game_admins
+    print ga
+    print ga.user
+
+    s = Server("SERVERSERVERserverSERVERserverSE", "23.54.12.95",
+               "illnevertellofcoursebutheyyourefreetotry", True)
+    print s
