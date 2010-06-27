@@ -39,6 +39,10 @@ model.py - data model
   for some tables; then add unique and index constraints on
   the composite keys we wanted to be primary originally; and
   we still have to use Sequence() to make some DBs happy...
+
+- revision histories (for bans specifically):
+  http://blog.mitechie.com/2010/01/18/auto-logging-to-sqlalchemy-and-turbogears-2/
+  http://www.sqlalchemy.org/docs/examples.html#module-versioning
 """
 
 from datetime import datetime
@@ -196,10 +200,8 @@ class Server(Base):
 
     id = Column(Integer, Sequence('servers_ids'), primary_key=True,
                 autoincrement=True, nullable=False, unique=True)
-
     guid = Column(GUID, nullable=False)
     address = Column(Address, nullable=False)
-
     rcon = Column(Short, nullable=False)
     active = Column(Boolean, nullable=False)
     created = Column(DateTime, nullable=False, doc="on insert")
@@ -216,6 +218,46 @@ class Server(Base):
     def __repr__(self):
         return "Server<guid: %s; address: %s; active: %s>" % (
             self.guid, self.address, self.active
+        )
+
+class Ban(Base):
+    """
+    Ban of an address range.
+
+    - uuid uniquely identifies ban, used in gossiping across
+      hubs; TODO: should one ban have several uuids or not?
+      right now several uuid are likely as utcnow() is used
+
+    - store address and subnet range separately for faster
+      range queries
+
+    - who was banned is stored in player_bans, which assumes
+      that we have a record for the player
+
+    - who did the ban and why as well as the history of the
+      ban over time is stored in history_bans
+
+    - TODO: should the hub build a custom data structure for
+      fast ban checks when it starts up?
+    """
+    __tablename__ = 'bans'
+
+    id = Column(Integer, Sequence('bans_ids'), autoincrement=True,
+                nullable=False, primary_key=True, unique=True)
+    uuid = Column(Password, nullable=False, unique=True, doc="unique ban id")
+    address = Column(Address, nullable=False, unique=True, doc="without CIDR")
+    cidr = Column(Integer, nullable=False)
+    active = Column(Boolean, nullable=False)
+
+    def __init__(self, address, cidr, active=True):
+        self.uuid = sha256("%s%s" % (datetime.utcnow(), address)).hexdigest()
+        self.address = address
+        self.cidr = cidr
+        self.active = active
+
+    def __repr__(self):
+        return "Ban<uuid: %s; address: %s/%s; active: %s>" % (
+            self.uuid, self.address, self.cidr, self.active
         )
 
 if __name__ == "__main__":
@@ -254,5 +296,9 @@ if __name__ == "__main__":
                "illnevertellofcoursebutheyyourefreetotry", True)
     session.add(s)
     print s
+
+    b = Ban("72.34.121.50", "24")
+    session.add(b)
+    print b
 
     session.commit()
