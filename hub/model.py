@@ -177,7 +177,7 @@ class GameAdmin(Base):
         single_parent=True
     )
 
-    def __init__(self, address, guid, password, active=False):
+    def __init__(self, address, guid, password):
         self.address = address
         self.guid = guid
         self.password = sha256(password).hexdigest()
