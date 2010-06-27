@@ -124,6 +124,9 @@ class User(Base):
     first = Column(DateTime, nullable=True, doc="first login")
     last = Column(DateTime, nullable=True, doc="last login")
 
+    game_admins = relationship('GameAdmin', backref='user',
+                               cascade='all, delete, delete-orphan')
+
     def __init__(self, login, password, name, email, activated=False,
                  disabled=False):
         self.login = login
@@ -168,14 +171,8 @@ class GameAdmin(Base):
     first = Column(DateTime, nullable=True, doc="first used in game")
     last = Column(DateTime, nullable=True, doc="last used in game")
 
-    user_id = Column(Integer, ForeignKey('users.id'))
-
-    user = relationship(
-        User,
-        backref=backref('game_admins', order_by=id),
-        cascade="all, delete, delete-orphan",
-        single_parent=True
-    )
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False,
+                     unique=False)
 
     def __init__(self, address, guid, password):
         self.address = address
