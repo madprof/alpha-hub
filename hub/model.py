@@ -49,8 +49,8 @@ from datetime import datetime
 from hashlib import sha256
 
 from sqlalchemy import Column, Sequence, ForeignKey
-from sqlalchemy import Boolean, Integer, String, Text, DateTime
-from sqlalchemy.orm import relationship, backref
+from sqlalchemy import Boolean, Integer, String, DateTime
+from sqlalchemy.orm import relationship
 from sqlalchemy.schema import UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -256,46 +256,3 @@ class Ban(Base):
         return "Ban<uuid: %s; address: %s/%s; active: %s>" % (
             self.uuid, self.address, self.cidr, self.active
         )
-
-if __name__ == "__main__":
-    from sqlalchemy import create_engine
-    engine = create_engine('sqlite:///test.db')
-    Base.metadata.create_all(engine)
-    from sqlalchemy.orm import sessionmaker
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
-    p = Player("|ALPHA| CCCP", "1.2.3.4", "CCCPCCCPCCCPCCCPCCCPCCCPCCCPCCCP",
-               "3.4.5.6:27964")
-    session.add(p)
-    print p
-    p2 = Player("a", "b", "c", "d")
-    session.add(p2)
-    print p2
-    print p
-
-    u = User("mad", "gagagagaga", "|ALPHA| Mad Professor",
-             "alpha.mad.professor@gmail.com", True)
-    session.add(u)
-    print u
-    print u.game_admins
-
-    ga = GameAdmin("5.3.1.9", "MADMADMADMADMADMADMADMADMADMADMA",
-                   "untzuntzuntzuntz", False)
-    session.add(ga)
-    u.game_admins.append(ga)
-    print u
-    print u.game_admins
-    print ga
-    print ga.user
-
-    s = Server("SERVERSERVERserverSERVERserverSE", "23.54.12.95",
-               "illnevertellofcoursebutheyyourefreetotry", True)
-    session.add(s)
-    print s
-
-    b = Ban("72.34.121.50", "24")
-    session.add(b)
-    print b
-
-    session.commit()
