@@ -90,6 +90,7 @@ class TestServers(object):
         ids = [1, 2, 3]
         addresses = ["1.2.3.4", "2.3.4.5", "23.54.12.95"]
         session = Global.Session()
+        assert session.query(Server).count() == 3
         i = 0
         for server in session.query(Server).order_by(Server.id):
             assert server.id == ids[i]
@@ -108,10 +109,88 @@ class TestServers(object):
         ids = [1, 3]
         addresses = ["1.2.3.4", "23.54.12.95"]
         session = Global.Session()
+        assert session.query(Server).count() == 2
         i = 0
         for server in session.query(Server).order_by(Server.id):
             assert server.id == ids[i]
             assert server.address == addresses[i]
+            i += 1
+        session.close()
+
+
+class TestPlayers(object):
+    """
+    Player objects.
+    TODO: failed objects/insertions/deletions?
+    """
+    def check_player(self, player, id, name, address, guid, server):
+        assert player.id == id
+        assert player.name == name
+        assert player.address == address
+        assert player.guid == guid
+        assert player.server == server
+        assert player.first is None or isinstance(player.first, datetime)
+        assert player.last is None or isinstance(player.last, datetime)
+        assert player.first <= player.last
+
+    def test0_insert(self):
+        players = [
+            Player("A", "1.2.3.4", "01234567890123456789012345678901",
+                   "3.4.5.6:27964"),
+            Player("B", "1.2.3.4", "01234567890123456789012345678901",
+                   "3.4.5.6:27964"),
+            Player("C", "1.2.3.4", "01234567890123456789012345678901",
+                   "3.4.5.6:27964"),
+            Player("D", "1.2.3.4", "01234567890123456789012345678901",
+                   "3.4.5.6:27964"),
+            Player("A", "1.7.3.4", "01234567890123456789012345678901",
+                   "3.4.5.6:27964"),
+        ]
+        session = Global.Session()
+        for player in players:
+            session.add(player)
+        session.commit()
+        self.check_player(players[1], 2, "B", "1.2.3.4",
+                          "01234567890123456789012345678901", "3.4.5.6:27964")
+        for i in range(len(players)):
+            assert i+1 == players[i].id
+        for i in range(len(players)):
+            assert players[i].first == players[i].last
+        for i in range(len(players)-1):
+            assert players[i].first < players[i+1].first
+            assert players[i].last < players[i+1].last
+        session.close()
+
+    def test1_select_before_delete(self):
+        ids = [1, 2, 3, 4, 5]
+        names = ["A", "B", "C", "D", "A"]
+        session = Global.Session()
+        assert session.query(Player).count() == 5
+        i = 0
+        for player in session.query(Player).order_by(Player.id):
+            assert player.id == ids[i]
+            assert player.name == names[i]
+            i += 1
+        session.close()
+
+    def test2_delete(self):
+        session = Global.Session()
+        player = session.query(Player).filter(Player.id==2).one()
+        session.delete(player)
+        player = session.query(Player).filter(Player.id==5).one()
+        session.delete(player)
+        session.commit()
+        session.close()
+
+    def test3_select_after_delete(self):
+        ids = [1, 3, 4]
+        names = ["A", "C", "D"]
+        session = Global.Session()
+        assert session.query(Player).count() == 3
+        i = 0
+        for player in session.query(Player).order_by(Player.id):
+            assert player.id == ids[i]
+            assert player.name == names[i]
             i += 1
         session.close()
 
@@ -149,25 +228,10 @@ class TestGoodObjects(object):
         assert isinstance(p.first, datetime)
         assert isinstance(p.last, datetime)
         assert p.first == p.last
-    def test_Server(self):
-        # TODO
-        s = Server("SERVERSERVERserverSERVERserverSE", "23.54.12.95",
-                   "illnevertellofcoursebutheyyourefreetotry", True)
     def test_User(self):
         # TODO
         u = User("mad", "gagagagaga", "|ALPHA| Mad Professor",
                  "alpha.mad.professor@gmail.com", True, False)
-
-class TestBadObjects(object):
-    """
-    Create bad objects and ensure failure.
-    """
-    # TODO
-    pass
-
-def test_insert_bans():
-    # TODO
-    assert False
 
 def test_insert_game_admins():
     """
@@ -211,40 +275,3 @@ def test_insert_game_admins():
 
     assert session.query(User).count() == 0
     assert session.query(GameAdmin).count() == 0
-
-def test_insert_players():
-    """
-    Insert a bunch of players.
-    """
-    ps = [
-        Player("A", "1.2.3.4", "01234567890123456789012345678901", "3.4.5.6:27964"),
-        Player("B", "1.2.3.4", "01234567890123456789012345678901", "3.4.5.6:27964"),
-        Player("C", "1.2.3.4", "01234567890123456789012345678901", "3.4.5.6:27964"),
-        Player("D", "1.2.3.4", "01234567890123456789012345678901", "3.4.5.6:27964"),
-        Player("A", "1.7.3.4", "01234567890123456789012345678901", "3.4.5.6:27964"),
-    ]
-
-    session = Global.Session()
-
-    for p in ps:
-        session.add(p)
-
-    session.commit()
-
-    for i in range(len(ps)):
-        assert i+1 == ps[i].id
-
-    for i in range(len(ps)):
-        assert ps[i].first == ps[i].last
-
-    for i in range(len(ps)-1):
-        assert ps[i].first < ps[i+1].first
-        assert ps[i].last < ps[i+1].last
-
-def test_insert_servers():
-    # TODO
-    assert False
-
-def test_insert_users():
-    # TODO
-    assert False
