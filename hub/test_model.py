@@ -50,6 +50,9 @@ def teardown_module():
     Clean up the test database.
     """
     from model import Base
+    from py.test import config
+    if config.getvalue("nodrop"):
+        return
     Base.metadata.drop_all(Global.engine)
 
 
@@ -217,17 +220,6 @@ class TestGoodObjects(object):
         assert g.first is None
         assert g.last is None
         assert g.user is None
-    def test_Player(self):
-        p = Player("|ALPHA| CCCP", "1.2.3.4",
-                   "CCCPCCCPCCCPCCCPCCCPCCCPCCCPCCCP", "3.4.5.6:27964")
-        assert p.id is None
-        assert p.name == "|ALPHA| CCCP"
-        assert p.address == "1.2.3.4"
-        assert p.guid == "CCCPCCCPCCCPCCCPCCCPCCCPCCCPCCCP"
-        assert p.server == "3.4.5.6:27964"
-        assert isinstance(p.first, datetime)
-        assert isinstance(p.last, datetime)
-        assert p.first == p.last
     def test_User(self):
         # TODO
         u = User("mad", "gagagagaga", "|ALPHA| Mad Professor",
