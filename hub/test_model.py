@@ -36,14 +36,12 @@ class Global(object):
 def setup_module():
     """
     Prepare the test database.
-    TODO: how to configure database system to test against?
     """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from model import Base
-    Global.engine = create_engine('sqlite:///alphahub.sqlite')
-#    engine = create_engine('mysql://alphahub:alphahub@localhost/alphahub')
-#    engine = create_engine('postgresql://alphahub:alphahub@localhost/alphahub')
+    from py.test import config
+    Global.engine = create_engine(config.getvalue("database"))
     Base.metadata.create_all(Global.engine)
     Global.Session = sessionmaker(bind=Global.engine)
 
