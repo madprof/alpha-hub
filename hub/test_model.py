@@ -8,7 +8,8 @@ test_model.py - test the data model
   stick with the TDD program and see where it leads...
 
 - both py.test and nose run setup_module() followed by all the
-  tests, followed by teardown_module()
+  tests, followed by teardown_module(); test functions run in
+  order of appearance, but test methods run in ALPHABETICAL order!
 
 - SQLite doesn't give a hoot about constraints like length of
   a string, so as long as we use it for testing we can't rely
@@ -52,6 +53,69 @@ def teardown_module():
     """
     from model import Base
     Base.metadata.drop_all(Global.engine)
+
+
+class TestServers(object):
+    """
+    Server objects.
+    TODO: failed objects/insertions/deletions?
+    """
+    def check_server(self, server, id, guid, address, rcon, active):
+        assert server.id == id
+        assert server.guid == guid
+        assert server.address == address
+        assert server.rcon == rcon
+        assert server.active == active
+        assert isinstance(server.created, datetime)
+        assert server.created < datetime.utcnow()
+        assert server.first is None or isinstance(server.first, datetime)
+        assert server.last is None or isinstance(server.last, datetime)
+        assert server.first <= server.last
+
+    def test0_insert(self):
+        servers = [
+            Server("first server guid", "1.2.3.4", "some password", True),
+            Server("second server guid", "2.3.4.5", "another pw", False),
+            Server("anotherserverlongenoughtofillit!", "23.54.12.95",
+                   "illnevertellofcoursebutheyyourefreetotrywhateverpassword",
+                   True)
+        ]
+        session = Global.Session()
+        for server in servers:
+            session.add(server)
+        session.commit()
+        self.check_server(servers[1], 2, "second server guid", "2.3.4.5",
+                          "another pw", False)
+        session.close()
+
+    def test1_select_before_delete(self):
+        ids = [1, 2, 3]
+        addresses = ["1.2.3.4", "2.3.4.5", "23.54.12.95"]
+        session = Global.Session()
+        i = 0
+        for server in session.query(Server).order_by(Server.id):
+            assert server.id == ids[i]
+            assert server.address == addresses[i]
+            i += 1
+        session.close()
+
+    def test2_delete(self):
+        session = Global.Session()
+        second = session.query(Server).filter(Server.id==2).one()
+        session.delete(second)
+        session.commit()
+        session.close()
+
+    def test3_select_after_delete(self):
+        ids = [1, 3]
+        addresses = ["1.2.3.4", "23.54.12.95"]
+        session = Global.Session()
+        i = 0
+        for server in session.query(Server).order_by(Server.id):
+            assert server.id == ids[i]
+            assert server.address == addresses[i]
+            i += 1
+        session.close()
 
 
 class TestGoodObjects(object):
