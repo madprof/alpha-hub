@@ -7,14 +7,52 @@ test_model.py - test the data model
 - writing all this testing code is fairly tedious, but let's
   stick with the TDD program and see where it leads...
 
+- both py.test and nose run setup_module() followed by all the
+  tests, followed by teardown_module()
+
 - SQLite doesn't give a hoot about constraints like length of
   a string, so as long as we use it for testing we can't rely
   on the database complaining about all violations of the model
+
+- MySQL can't even process our model without changes, neither
+  PostgreSQL nor SQLite have any problem with it of course
 """
 
 from datetime import datetime
-from model import Base
 from model import Ban, GameAdmin, Player, Server, User
+
+
+class Global(object):
+    """
+    Global state for tests.
+    """
+    # factory class for sessions
+    Session = None
+    # engine we are connected to
+    engine = None
+
+
+def setup_module():
+    """
+    Prepare the test database.
+    TODO: how to configure database system to test against?
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from model import Base
+    Global.engine = create_engine('sqlite:///alphahub.sqlite')
+#    engine = create_engine('mysql://alphahub:alphahub@localhost/alphahub')
+#    engine = create_engine('postgresql://alphahub:alphahub@localhost/alphahub')
+    Base.metadata.create_all(Global.engine)
+    Global.Session = sessionmaker(bind=Global.engine)
+
+def teardown_module():
+    """
+    Clean up the test database.
+    """
+    from model import Base
+    Base.metadata.drop_all(Global.engine)
+
 
 class TestGoodObjects(object):
     """
@@ -65,23 +103,6 @@ class TestBadObjects(object):
     # TODO
     pass
 
-def new_database_and_session():
-    """
-    Return a new Session class for a new database.
-    """
-    from sqlalchemy import create_engine
-    engine = create_engine('sqlite:///')
-    Base.metadata.create_all(engine)
-    from sqlalchemy.orm import sessionmaker
-    Session = sessionmaker(bind=engine)
-    return Session
-
-def test_database_creation():
-    """
-    Create an SQLite database from model.
-    """
-    new_database_and_session()
-
 def test_insert_bans():
     # TODO
     assert False
@@ -90,8 +111,7 @@ def test_insert_game_admins():
     """
     Insert a user and a bunch of gameadmins.
     """
-    Session = new_database_and_session()
-    session = Session()
+    session = Global.Session()
 
     u = User("mad", "gagagagaga", "|ALPHA| Mad Professor",
              "alpha.mad.professor@gmail.com", True, False)
@@ -142,8 +162,7 @@ def test_insert_players():
         Player("A", "1.7.3.4", "01234567890123456789012345678901", "3.4.5.6:27964"),
     ]
 
-    Session = new_database_and_session()
-    session = Session()
+    session = Global.Session()
 
     for p in ps:
         session.add(p)
