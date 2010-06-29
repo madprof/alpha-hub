@@ -47,3 +47,38 @@ class BanNotification(GameServerReply):
 
 class AdminAuthorized(Event):
     """Notification of administrator credentials."""
+
+
+class WebRequest(Event):
+    """Event from the website."""
+
+class WebLogin(Event):
+    """User wants authorization."""
+
+class WebLogout(Event):
+    """User leaves."""
+
+class WebDashboard(Event):
+    """User wants dashboard."""
+
+class WebPlayerList(Event):
+    """User wants player list."""
+
+class WebPlayerDetail(Event):
+    """User wants player details."""
+
+class WebBanList(Event):
+    """User wants ban list."""
+
+class WebBanDetail(Event):
+    """User wants ban details."""
+
+class WebBanEdit(Event):
+    """User edits ban."""
+
+class WebBanCreate(Event):
+    """User creates ban."""
+
+
+class WebResponse(Event):
+    """Event to the website."""
