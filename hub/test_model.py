@@ -198,19 +198,6 @@ class TestPlayers(object):
         session.close()
 
 
-class TestGoodObjects(object):
-    """
-    Create model objects and check consistency.
-    """
-    def test_Ban(self):
-        b = Ban("72.34.121.50", 24)
-        assert b.id is None
-        assert len(b.uuid) == 64
-        assert b.address == "72.34.121.50"
-        assert b.cidr == 24
-        assert b.active
-
-
 class TestUsers(object):
     """
     User objects.
@@ -370,4 +357,61 @@ class TestGameAdmins(object):
         gameadmin = session.query(GameAdmin).one()
         assert gameadmin.id == 2
         assert gameadmin.address == "5.3.3.9"
+        session.close()
+
+
+class TestBans(object):
+    """
+    Ban objects.
+    TODO: failed objects/insertions/deletions?
+    """
+    def check_ban(self, ban, id, address, cidr, active):
+        assert ban.id == id
+        assert len(ban.uuid) == 64
+        assert ban.address == address
+        assert ban.cidr == cidr
+        assert ban.active == active
+
+    def test0_insert(self):
+        bans = [
+            Ban("72.34.121.50", 24),
+            Ban("1.2.3.4", 16, False),
+            Ban("233.255.21.2", 8, True)
+        ]
+        session = Global.Session()
+        for ban in bans:
+            session.add(ban)
+        session.commit()
+        self.check_ban(bans[1], 2, "1.2.3.4", 16, False)
+        session.close()
+
+    def test1_select_before_delete(self):
+        ids = [1, 2, 3]
+        addresses = ["72.34.121.50", "1.2.3.4", "233.255.21.2"]
+        session = Global.Session()
+        assert session.query(Ban).count() == 3
+        i = 0
+        for ban in session.query(Ban).order_by(Ban.id):
+            assert ban.id == ids[i]
+            assert ban.address == addresses[i]
+            i += 1
+        session.close()
+
+    def test2_delete(self):
+        session = Global.Session()
+        second = session.query(Ban).filter(Ban.id==2).one()
+        session.delete(second)
+        session.commit()
+        session.close()
+
+    def test3_select_after_delete(self):
+        ids = [1, 3]
+        addresses = ["72.34.121.50", "233.255.21.2"]
+        session = Global.Session()
+        assert session.query(Server).count() == 2
+        i = 0
+        for ban in session.query(Ban).order_by(Ban.id):
+            assert ban.id == ids[i]
+            assert ban.address == addresses[i]
+            i += 1
         session.close()
