@@ -209,61 +209,165 @@ class TestGoodObjects(object):
         assert b.address == "72.34.121.50"
         assert b.cidr == 24
         assert b.active
-    def test_GameAdmin(self):
-        g = GameAdmin("5.3.1.9", "MADMADMADMADMADMADMADMADMADMADMA",
+
+
+class TestUsers(object):
+    """
+    User objects.
+    TODO: failed objects/insertions/deletions?
+    """
+    def check_user(self, user, id, login, password, name, email, activated,
+                   disabled):
+        from hashlib import sha256
+        assert user.id == id
+        assert user.login == login
+        assert user.password == sha256(password).hexdigest()
+        assert user.name == name
+        assert user.email == email
+        assert user.activated == activated
+        assert user.disabled == disabled
+        assert user.created < datetime.utcnow()
+        assert user.first is None or isinstance(user.first, datetime)
+        assert user.last is None or isinstance(user.last, datetime)
+        assert user.first <= user.last
+        assert isinstance(user.game_admins, list)
+
+    def test0_insert(self):
+        users = [
+            User("girt", "ihateindianfood", "|ALPHA| Girt",
+                 "girtbeefrobe@gmail.com", False, False),
+            User("mad", "gagagagaga", "|ALPHA| Mad Professor",
+                 "alpha.mad.professor@gmail.com", True, False),
+            User("mission", "bmwsrmylife", "|ALPHA| Mission",
+                 "dejgaming@gmail.com", True, False),
+            User("slayer", "isuck", "RunSlayerPropaneAmuk",
+                 "ass@wipe.flush", False, False)
+        ]
+        session = Global.Session()
+        for user in users:
+            session.add(user)
+        session.commit()
+        self.check_user(users[1], 2, "mad", "gagagagaga",
+                        "|ALPHA| Mad Professor",
+                        "alpha.mad.professor@gmail.com", True, False)
+        for i in range(len(users)):
+            assert i+1 == users[i].id
+        session.close()
+
+    def test1_select_before_delete(self):
+        ids = [1, 2, 3, 4]
+        logins = ["girt", "mad", "mission", "slayer"]
+        session = Global.Session()
+        assert session.query(User).count() == 4
+        i = 0
+        for user in session.query(User).order_by(User.id):
+            assert user.id == ids[i]
+            assert user.login == logins[i]
+            i += 1
+        session.close()
+
+    def test2_delete(self):
+        session = Global.Session()
+        user = session.query(User).filter(User.id==4).one()
+        session.delete(user)
+        session.commit()
+        session.close()
+
+    def test3_select_after_delete(self):
+        ids = [1, 2, 3]
+        logins = ["girt", "mad", "mission"]
+        session = Global.Session()
+        assert session.query(User).count() == 3
+        i = 0
+        for user in session.query(User).order_by(User.id):
+            assert user.id == ids[i]
+            assert user.login == logins[i]
+            i += 1
+        session.close()
+
+
+class TestGameAdmins(object):
+    """
+    GameAdmin objects.
+    TODO: failed objects/insertions/deletions?
+    """
+    def check_gameadmin(self, gameadmin, user, id, address, guid, password):
+        from hashlib import sha256
+        assert gameadmin.id == id
+        assert gameadmin.address == address
+        assert gameadmin.guid == guid
+        assert gameadmin.password == sha256(password).hexdigest()
+        assert gameadmin.created < datetime.utcnow()
+        assert gameadmin.first is None or isinstance(user.first, datetime)
+        assert gameadmin.last is None or isinstance(user.last, datetime)
+        assert gameadmin.first <= user.last
+        assert gameadmin.user_id == user.id
+
+    def test0_insert(self):
+        session = Global.Session()
+        # TODO: works if we load the users here
+        mad = session.query(User).filter(User.id==2).one()
+        girt = session.query(User).filter(User.id==1).one()
+        gameadmins = [
+            GameAdmin("5.3.1.9", "MADMADMADMADMADMADMADMADMADMADMA",
+                      "untzuntzuntzuntz"),
+            GameAdmin("5.3.3.9", "MADMADMADMADMADMADMADMADMADMADMA",
+                      "untzuntzuntzuntz"),
+            GameAdmin("5.3.1.9", "SADSADSADSADSADSADSADSADSADSADSA",
                       "untzuntzuntzuntz")
-        assert g.id is None
-        assert g.address == "5.3.1.9"
-        assert g.guid == "MADMADMADMADMADMADMADMADMADMADMA"
-        assert len(g.password) == 64
-        assert isinstance(g.created, datetime)
-        assert g.first is None
-        assert g.last is None
-        assert g.user is None
-    def test_User(self):
-        # TODO
-        u = User("mad", "gagagagaga", "|ALPHA| Mad Professor",
-                 "alpha.mad.professor@gmail.com", True, False)
+        ]
+        for gameadmin in gameadmins:
+            session.add(gameadmin)
+        # TODO: but doesn't work if we load them here?
+        gameadmins[0].user = mad
+        gameadmins[1].user = mad
+        gameadmins[2].user = girt
+        # TODO: can't use the following instead? i thought it's symmetric?
+#        mad.game_admins.append(gameadmins[0])
+#        mad.game_admins.append(gameadmins[1])
+#        girt.game_admins.append(gameadmins[2])
+        session.commit()
+        self.check_gameadmin(gameadmins[0], mad, 1, "5.3.1.9",
+                             "MADMADMADMADMADMADMADMADMADMADMA",
+                             "untzuntzuntzuntz")
+        self.check_gameadmin(gameadmins[1], mad, 2, "5.3.3.9",
+                             "MADMADMADMADMADMADMADMADMADMADMA",
+                             "untzuntzuntzuntz")
+        self.check_gameadmin(gameadmins[2], girt, 3, "5.3.1.9",
+                             "SADSADSADSADSADSADSADSADSADSADSA",
+                             "untzuntzuntzuntz")
+        for i in range(len(gameadmins)):
+            assert i+1 == gameadmins[i].id
+        session.close()
 
-def test_insert_game_admins():
-    """
-    Insert a user and a bunch of gameadmins.
-    """
-    session = Global.Session()
+    def test1_select_before_delete(self):
+        ids = [1, 2, 3]
+        addresses = ["5.3.1.9", "5.3.3.9", "5.3.1.9"]
+        session = Global.Session()
+        assert session.query(User).count() == 3
+        assert session.query(GameAdmin).count() == 3
+        i = 0
+        for gameadmin in session.query(GameAdmin).order_by(GameAdmin.id):
+            assert gameadmin.id == ids[i]
+            assert gameadmin.address == addresses[i]
+            i += 1
+        session.close()
 
-    u = User("mad", "gagagagaga", "|ALPHA| Mad Professor",
-             "alpha.mad.professor@gmail.com", True, False)
-    session.add(u)
-    session.commit()
-    assert len(u.game_admins) == 0
+    def test2_delete(self):
+        session = Global.Session()
+        gameadmin = session.query(GameAdmin).filter(GameAdmin.id==1).one()
+        session.delete(gameadmin)
+        session.commit()
+        user = session.query(User).filter(User.login=="girt").one()
+        session.delete(user)
+        session.commit()
+        session.close()
 
-    ads = [
-        GameAdmin("5.3.1.9", "MADMADMADMADMADMADMADMADMADMADMA", "untzuntzuntzuntz"),
-        GameAdmin("2.3.1.9", "MADMADMADMADMADMADMADMADMADMADMA", "untzuntzuntzuntz"),
-        GameAdmin("5.3.1.9", "SADSADSADMADMADMADSADMADMADMADMA", "untzuntzuntzuntz"),
-    ]
-
-    for a in ads:
-        a.user = u
-        session.add(a)
-
-    session.commit()
-
-    assert len(u.game_admins) == 3
-    for i in range(len(ads)):
-        assert ads[i] == u.game_admins[i]
-
-    assert session.query(User).count() == 1
-    assert session.query(GameAdmin).count() == 3
-
-    session.delete(ads[2])
-    session.commit()
-
-    assert session.query(User).count() == 1
-    assert session.query(GameAdmin).count() == 2
-
-    session.delete(u)
-    session.commit()
-
-    assert session.query(User).count() == 0
-    assert session.query(GameAdmin).count() == 0
+    def test3_select_after_delete(self):
+        session = Global.Session()
+        assert session.query(User).count() == 2
+        assert session.query(GameAdmin).count() == 1
+        gameadmin = session.query(GameAdmin).one()
+        assert gameadmin.id == 2
+        assert gameadmin.address == "5.3.3.9"
+        session.close()
