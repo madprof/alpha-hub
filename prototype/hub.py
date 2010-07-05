@@ -1,9 +1,10 @@
 """
 A simple prototype for |ALPHA| Hub.
 
-- receives UDP packets with userinfo strings
-- echos them to other hubs
+- receives userinfo strings from game servers
 - parses them and logs important pieces in a database
+- gossips with other hubs
+- logs gossip in a database
 """
 
 from socket import socket, AF_INET, SOCK_DGRAM, gethostbyname
@@ -13,75 +14,130 @@ import logging
 import hashlib
 import os
 
-# load the configuration file
-HOST = None
-SERVERS = None
-HUBS = None
-execfile(os.path.expanduser("~/.alphahub/config.py"))
-
-def normalize_config(config):
+def load_config(path):
     """
-    Convert configured hostnames IP addresses.
+    Load configuration file from given path.
 
-    Packets from socket.recvfrom() have raw IPs, but we allow hostnames
-    in the config file; so we convert all hostnames to IPs.
+    Basic consistency checks, safe defaults for missing keys.
+    """
+    logging.debug("loading config file '%s'", path)
+    default = {
+        'host': 'localhost',
+        'database': 'hub.db',
+        'servers': {},
+        'upstream': {},
+        'downstream': {},
+        '__name': 'default',
+    }
+    config = {}
+    if not os.path.exists(path):
+        logging.error("config file '%s' not found", path)
+        config = default
+    else:
+        execfile(path, globals(), config)
+        config['__name'] = path
+        validate_config(config, default)
+        config['servers'] = resolve_config(config['servers'])
+        config['upstream'] = resolve_config(config['upstream'])
+        config['downstream'] = resolve_config(config['downstream'])
+    logging.debug("loaded config file '%s'", path)
+    return config
+
+def validate_config(config, default):
+    """
+    Validate config against default.
+    """
+    for section in default:
+        if section not in config:
+            logging.error("config file '%s' has no section '%s'",
+                          config['__name'], section)
+            config[section] = default[section]
+        if type(config[section]) is not type(default[section]):
+            logging.error("config file '%s' section '%s' has wrong format",
+                          config['__name'], section)
+            config[section] = default[section]
+
+def resolve_config(section):
+    """
+    Resolve configured host names to IP addresses.
+
+    We allow host names in the config file but want to avoid DNS queries
+    in the main loop; so we convert all hostnames to IPs on startup.
 
     TODO: Support IPv6?
     """
     resolved = {}
-    for server in config:
+    for server in section:
         ip = gethostbyname(server)
         if ip != server:
             logging.info("%s resolved to %s", server, ip)
             assert ip not in resolved # no duplicates!
-            resolved[ip] = config[server]
-	else:
+            resolved[ip] = section[server]
+        else:
             assert server not in resolved # no duplicates!
-            resolved[server] = config[server]
+            resolved[server] = section[server]
     return resolved
 
-def open_sockets():
+def open_sockets(config):
     """
     Open all sockets.
     """
-    IN = []
-    for server, (port, _secret) in SERVERS.iteritems():
+    host = config['host']
+    servers = []
+    for server, (port, _secret) in config['servers'].iteritems():
         sock = socket(AF_INET, SOCK_DGRAM)
-        sock.bind((HOST, port))
-        IN.append(sock)
-    OUT = []
-    for server, (port, _secret) in HUBS.iteritems():
+        sock.bind((host, port))
+        logging.debug("bound socket %s for server %s", sock.getsockname(),
+                      server)
+        servers.append(sock)
+    upstream = []
+    for server, (port, _secret) in config['upstream'].iteritems():
+        sock = socket(AF_INET, SOCK_DGRAM)
+        sock.bind((host, port))
+        logging.debug("bound socket %s for upstream %s", sock.getsockname(),
+                      server)
+        upstream.append(sock)
+    downstream = []
+    for server, (port, _secret) in config['downstream'].iteritems():
         sock = socket(AF_INET, SOCK_DGRAM)
         sock.connect((server, port))
-        OUT.append(sock)
-    return (IN, OUT)
+        logging.debug("connected socket %s for downstream %s",
+                      sock.getsockname(), sock.getpeername())
+        downstream.append(sock)
+    return servers, upstream, downstream
 
-def close_sockets(IN, OUT):
+def close_sockets(servers, upstream, downstream):
     """
     Close all sockets.
     """
-    for sock in IN:
-        sock.close()
-    for sock in OUT:
+    for sock in servers+upstream+downstream:
+        logging.debug("closing socket %s", sock.getsockname())
         sock.close()
 
-def open_database(name):
+def open_database(config):
     """
     Open database.
     """
-    DB = connect(name, detect_types=PARSE_DECLTYPES)
-    DB.row_factory = Row
-    DB.text_factory = str
-    return DB
+    conn = connect(config['database'], detect_types=PARSE_DECLTYPES)
+    conn.row_factory = Row
+    conn.text_factory = str
+    with open("hub.sql") as script_file:
+        script = script_file.read()
+        conn.executescript(script)
+        # TODO: would love to detect if we created a new database
+        # here but can't due to sqlite interface limitations?
+    logging.debug("opened database '%s'", config['database'])
+    return conn
 
-def close_database(DB):
+def close_database(conn):
     """
     Close database.
     """
-    DB.commit()
-    DB.close()
+    conn.commit()
+    conn.close()
+    logging.debug("closed database")
 
-def write_record(DB, name, ip, guid, server, port):
+def write_record(database, name, ip, guid, server, port):
     """
     Write a player record to the database.
 
@@ -92,24 +148,24 @@ def write_record(DB, name, ip, guid, server, port):
         "recording %s from ip %s with guid %s playing on %s:%s",
         name, ip, guid, server, port
     )
-    results = DB.execute(
+    results = database.execute(
                   """SELECT * FROM Players WHERE
                      name=? AND ip=? AND guid=? AND server=? AND port=?""",
                   (name, ip, guid, server, port)
               ).fetchall()
     if len(results) == 0:
-        DB.execute(
+        database.execute(
             """INSERT INTO Players (name, ip, guid, server, port)
                VALUES (?, ?, ?, ?, ?)""",
             (name, ip, guid, server, port)
         )
     else:
-        DB.execute(
+        database.execute(
             """UPDATE Players SET guid=? WHERE
                name=? AND ip=? AND guid=? AND server=? AND port=?""",
             (guid, name, ip, guid, server, port)
         )
-    DB.commit()
+    database.commit()
 
 def parse_userinfo(userinfo):
     """
@@ -121,7 +177,7 @@ def parse_userinfo(userinfo):
     values = data[1::2]
     return dict(zip(keys, values))
 
-def handle_userinfo(DB, host, port, data):
+def handle_userinfo(config, database, host, port, data):
     """
     Handle a userinfo packet.
 
@@ -139,68 +195,72 @@ def handle_userinfo(DB, host, port, data):
         logging.debug("invalid md4 length")
         return False
 
-    secret = SERVERS[host][1]
+    secret = config['servers'][host][1]
     checksum = hashlib.new("md4", secret+"\n"+data).hexdigest()
     if md4 != checksum:
         logging.debug("invalid checksum (secrets probably don't match)")
         return False
 
-    kind, data = data.split("\n", 1) 
+    kind, data = data.split("\n", 1)
     if kind != "userinfo":
         logging.debug("not a userinfo packet")
         return False
 
     var = parse_userinfo(data)
-    write_record(DB, var["name"], var["ip"], var["cl_guid"], host, port)
+    write_record(database, var["name"], var["ip"], var["cl_guid"], host, port)
 
     return True
 
-def run(IN, OUT, DB):
+def run(config, servers, upstream, downstream, database):
     """
-    Main loop, receiving packets from all our sockets
-    and dispatching them.
+    Receive and handle packets from all our sockets.
     """
     while True:
-        logging.debug("waiting in select")
-        ready, _, _ = select(IN[:], [], [])
+        logging.debug("sleeping in select")
+        ready, _, _ = select(servers+upstream, [], [])
+        logging.debug("woke up for %s socket(s)", len(ready))
         for sock in ready:
-            msg, (host, port) = sock.recvfrom(4096)
+            packet, (host, port) = sock.recvfrom(4096)
             logging.debug("received packet from %s:%s", host, port)
-            if host not in SERVERS:
-                logging.debug("host %s not in server list", host)
-                continue
-            if handle_userinfo(DB, host, port, msg):
-                logging.debug("echoing packet from %s:%s", host, port)
-                for out in OUT:
-                    logging.debug("to %s", out.getpeername())
-                    out.sendall(msg) # TODO: prefix original host:port?
+            if host in config['servers']:
+                logging.debug("processing server packet from %s:%s", host, port)
+                if handle_userinfo(config, database, host, port, packet):
+                    logging.debug("echoing packet from %s:%s", host, port)
+                    for out in downstream:
+                        logging.debug("to downstream %s", out.getpeername())
+                        out.sendall(packet) # TODO: prefix original host:port?
+            elif host in config['upstream']:
+                logging.warning("upstream packet handling not implemented!")
+            else:
+                logging.debug("ignored spurious packet from %s:%s", host, port)
+
+def safe_run(config, servers, upstream, downstream, database):
+    """
+    Wrapper around run() to catch exceptions.
+    """
+    try:
+        run(config, servers, upstream, downstream, database)
+    except Exception as exc:
+        logging.exception("terminated by exception %s", exc)
 
 def main():
     """
-    Main program, set up logging and (mostly) log
-    simple status messages.
+    Main program.
+
+    Load config, setup, and teardown.
     """
     logging.info("starting |ALPHA| Hub prototype")
-    IN, OUT = open_sockets()
-    logging.debug("bound and connected sockets")
-    DB = open_database("hub.db")
-    logging.debug("opened database")
-    try:
-        run(IN, OUT, DB)
-    except Exception as exc:
-        logging.exception("exception %s", exc)
-    finally:
-        logging.info("stopping |ALPHA| Hub prototype")
-        close_database(DB)
-        logging.debug("closed database")
-        close_sockets(IN, OUT)
-        logging.debug("closed sockets")
+    config = load_config(os.path.expanduser("~/.alphahub/config.py"))
+    servers, upstream, downstream = open_sockets(config)
+    logging.debug("bound and connected all sockets")
+    database = open_database(config)
+    safe_run(config, servers, upstream, downstream, database)
+    logging.info("stopping |ALPHA| Hub prototype")
+    close_database(database)
+    close_sockets(servers, upstream, downstream)
+    logging.debug("closed all sockets")
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s - %(levelname)s - %(message)s"
-    )
-    SERVERS = normalize_config(SERVERS)
-    HUBS = normalize_config(HUBS)
+    logging.basicConfig(level=logging.DEBUG,
+                        format="%(asctime)s - %(levelname)s - %(message)s")
     main()
