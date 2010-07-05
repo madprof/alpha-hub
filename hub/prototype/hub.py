@@ -88,6 +88,7 @@ def write_record(DB, name, ip, guid, server, port):
                name=? AND ip=? AND guid=? AND server=? AND port=?""",
             (guid, name, ip, guid, server, port)
         )
+    DB.commit()
 
 def parse_userinfo(userinfo):
     """
