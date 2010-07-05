@@ -6,7 +6,7 @@ A simple prototype for |ALPHA| Hub.
 - parses them and logs important pieces in a database
 """
 
-from socket import socket, AF_INET, SOCK_DGRAM
+from socket import socket, AF_INET, SOCK_DGRAM, gethostbyname
 from sqlite3 import connect, PARSE_DECLTYPES, Row
 from select import select
 import logging
@@ -18,6 +18,24 @@ HOST = None
 SERVERS = None
 HUBS = None
 execfile(os.path.expanduser("~/.alphahub/config.py"))
+
+def normalize_config(config):
+    """
+    Convert configured hostnames IP addresses.
+
+    Packets from socket.recvfrom() have raw IPs, but we allow hostnames
+    in the config file; so we convert all hostnames to IPs.
+
+    TODO: Support IPv6?
+    """
+    resolved = {}
+    for server in config:
+        ip = gethostbyname(server)
+        if ip != server:
+            logging.info("%s resolved to %s", server, ip)
+            assert ip not in resolved # no duplicates!
+            resolved[ip] = config[server]
+    return resolved
 
 def open_sockets():
     """
@@ -158,10 +176,6 @@ def main():
     Main program, set up logging and (mostly) log
     simple status messages.
     """
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s - %(levelname)s - %(message)s"
-    )
     logging.info("starting |ALPHA| Hub prototype")
     IN, OUT = open_sockets()
     logging.debug("bound and connected sockets")
@@ -179,4 +193,10 @@ def main():
         logging.debug("closed sockets")
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+    SERVERS = normalize_config(SERVERS)
+    HUBS = normalize_config(HUBS)
     main()
