@@ -15,6 +15,7 @@ HOST = "the.hub.machine.tld"
 
 SERVERS = {
     "some.game.server.tld": (42, "somesecret"),
+    "some.other.game.tld": (543, "monkeyspam"),
 }
 
 # the other hubs we echo to; note that we don't yet change
