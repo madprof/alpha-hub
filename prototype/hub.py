@@ -35,6 +35,9 @@ def normalize_config(config):
             logging.info("%s resolved to %s", server, ip)
             assert ip not in resolved # no duplicates!
             resolved[ip] = config[server]
+	else:
+            assert server not in resolved # no duplicates!
+            resolved[server] = config[server]
     return resolved
 
 def open_sockets():
@@ -169,6 +172,7 @@ def run(IN, OUT, DB):
             if handle_userinfo(DB, host, port, msg):
                 logging.debug("echoing packet from %s:%s", host, port)
                 for out in OUT:
+                    logging.debug("to %s", out.getpeername())
                     out.sendall(msg) # TODO: prefix original host:port?
 
 def main():
