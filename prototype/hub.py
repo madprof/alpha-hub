@@ -7,6 +7,9 @@ A simple prototype for |ALPHA| Hub.
 - logs gossip in a database
 """
 
+# TODO: add "global" stuff to config as __private attributes
+# to reduce number of parameters passed around?
+
 from socket import socket, AF_INET, SOCK_DGRAM, gethostbyname
 from sqlite3 import connect, PARSE_DECLTYPES, Row
 from select import select
@@ -137,11 +140,11 @@ def close_database(conn):
     conn.close()
     logging.debug("closed database")
 
-def write_record(database, name, ip, guid, server, port):
+def write_player(database, name, ip, guid, server, port):
     """
     Write a player record to the database.
 
-    If the record existing already, we fake an update
+    If the record exists already, we fake an update
     to get "last" updated by the database trigger.
     """
     logging.info(
@@ -167,6 +170,38 @@ def write_record(database, name, ip, guid, server, port):
         )
     database.commit()
 
+def write_gossip(database, name, ip, guid, server, port, origin):
+    """
+    Write a gossip record to the database.
+
+    If the record exists already, we fake an update
+    to get "last" and "count" updated by the database trigger.
+    """
+    logging.info(
+        "gossip from %s: recording %s from ip %s with guid %s playing on %s:%s",
+        origin, name, ip, guid, server, port
+    )
+    results = database.execute(
+                  """SELECT * FROM Gossip WHERE
+                     name=? AND ip=? AND guid=? AND server=? AND port=? AND
+                     origin=?""",
+                  (name, ip, guid, server, port, origin)
+              ).fetchall()
+    if len(results) == 0:
+        database.execute(
+            """INSERT INTO Players (name, ip, guid, server, port, origin)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (name, ip, guid, server, port, origin)
+        )
+    else:
+        database.execute(
+            """UPDATE Players SET guid=? WHERE
+               name=? AND ip=? AND guid=? AND server=? AND port=? AND
+               origin=?""",
+            (guid, name, ip, guid, server, port, origin)
+        )
+    database.commit()
+
 def parse_userinfo(userinfo):
     """
     Parse userinfo string into dictionary.
@@ -177,7 +212,7 @@ def parse_userinfo(userinfo):
     values = data[1::2]
     return dict(zip(keys, values))
 
-def handle_userinfo(config, database, host, port, data):
+def handle_userinfo(config, database, downstream, host, port, data):
     """
     Handle a userinfo packet.
 
@@ -186,30 +221,74 @@ def handle_userinfo(config, database, host, port, data):
     packet as invalid, true if we accepted it.
     """
     header, data = data[0:4], data[4:]
-    if header != "\xff\xff\xff\xff":
+    if header != '\xff\xff\xff\xff':
         logging.debug("invalid packet header")
-        return False
+        return
 
-    md4, data = data.split("\n", 1) 
+    md4, data = data.split('\n', 1)
     if len(md4) != 32:
         logging.debug("invalid md4 length")
-        return False
+        return
 
     secret = config['servers'][host][1]
-    checksum = hashlib.new("md4", secret+"\n"+data).hexdigest()
+    checksum = hashlib.new('md4', secret+'\n'+data).hexdigest()
     if md4 != checksum:
         logging.debug("invalid checksum (secrets probably don't match)")
-        return False
+        return
 
-    kind, data = data.split("\n", 1)
-    if kind != "userinfo":
+    kind, data = data.split('\n', 1)
+    if kind != 'userinfo':
         logging.debug("not a userinfo packet")
-        return False
+        return
 
     var = parse_userinfo(data)
-    write_record(database, var["name"], var["ip"], var["cl_guid"], host, port)
+    write_player(database, var['name'], var['ip'], var['cl_guid'], host, port)
+    if len(downstream) > 0:
+        echo_downstream(config, downstream, host, port, var)
 
-    return True
+def echo_downstream(config, downstream, host, port, var):
+    """
+    Send gossip to downstream hubs.
+    """
+    logging.debug("echoing packet from %s:%s...", host, port)
+    payload = 'gossip player\n\\server\\%s:%s\\name\\%s\\ip\\%s\\guid\\%s' % (
+        host, port, var['name'], var['ip'], var['cl_guid'])
+    for out in downstream:
+        logging.debug("...to downstream %s", out.getpeername())
+        secret = config['downstream'][out.getpeername()[0]][1]
+        md4 = hashlib.new('md4', secret+'\n'+payload).hexdigest()
+        packet = md4+'\n'+payload
+        out.sendall(packet)
+
+def handle_gossip(config, database, host, port, data):
+    """
+    Handle a gossip packet.
+
+    Checks packet structure, MD4 checksum, etc. and eventually
+    writes the gossip record. Returns false if we rejected the
+    packet as invalid, true if we accepted it.
+    """
+    md4, data = data.split('\n', 1)
+    if len(md4) != 32:
+        logging.debug("invalid md4 length")
+        return
+
+    secret = config['servers'][host][1]
+    checksum = hashlib.new('md4', secret+'\n'+data).hexdigest()
+    if md4 != checksum:
+        logging.debug("invalid checksum (secrets probably don't match)")
+        return
+
+    kind, data = data.split('\n', 1)
+    if kind != 'gossip player':
+        logging.debug("not a gossip player packet")
+        return
+
+    var = parse_userinfo(data)
+    origin = '%s:%s' % (host, port)
+    host, port = var['server'].split(':')
+    write_gossip(database, var['name'], var['ip'], var['cl_guid'], host, port,
+                 origin)
 
 def run(config, servers, upstream, downstream, database):
     """
@@ -224,13 +303,12 @@ def run(config, servers, upstream, downstream, database):
             logging.debug("received packet from %s:%s", host, port)
             if host in config['servers']:
                 logging.debug("processing server packet from %s:%s", host, port)
-                if handle_userinfo(config, database, host, port, packet):
-                    logging.debug("echoing packet from %s:%s", host, port)
-                    for out in downstream:
-                        logging.debug("to downstream %s", out.getpeername())
-                        out.sendall(packet) # TODO: prefix original host:port?
+                handle_userinfo(config, database, downstream, host, port,
+                                packet)
             elif host in config['upstream']:
-                logging.warning("upstream packet handling not implemented!")
+                logging.debug("processing upstream packet from %s:%s", host,
+                              port)
+                handle_gossip(config, database, host, port, packet)
             else:
                 logging.debug("ignored spurious packet from %s:%s", host, port)
 
