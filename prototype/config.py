@@ -8,6 +8,11 @@
 
 host = "the.hub.machine.tld"
 
+# SQLite database file to use; eventually this will be a
+# "real" database connection URL
+
+database = "hub.db"
+
 # the servers we listen to; for now each box has one port
 # and secret on the hub, even if it runs multiple game
 # servers; for a setup where one box runs games servers for
