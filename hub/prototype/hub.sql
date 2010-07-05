@@ -6,8 +6,8 @@ CREATE TABLE Players (
     guid VARCHAR NOT NULL,
     server VARCHAR NOT NULL,
     port VARCHAR NOT NULL,
-    first TIMESTAMP,
-    last TIMESTAMP,
+    first TIMESTAMP DEFAULT NULL,
+    last TIMESTAMP DEFAULT NULL,
     PRIMARY KEY (ip, name, guid, server, port)
 );
 
