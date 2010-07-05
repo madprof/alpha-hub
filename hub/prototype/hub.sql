@@ -4,9 +4,11 @@ CREATE TABLE Players (
     ip VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
     guid VARCHAR NOT NULL,
+    server VARCHAR NOT NULL,
+    port VARCHAR NOT NULL,
     first TIMESTAMP,
     last TIMESTAMP,
-    PRIMARY KEY (ip, name, guid)
+    PRIMARY KEY (ip, name, guid, server, port)
 );
 
 CREATE TRIGGER insertPlayer AFTER INSERT ON Players
