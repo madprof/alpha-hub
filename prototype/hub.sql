@@ -1,5 +1,7 @@
 -- create sqlite database for |ALPHA| Hub prototype
 
+BEGIN TRANSACTION;
+
 -- actual players from game servers we run and trust
 CREATE TABLE IF NOT EXISTS Players (
     ip VARCHAR NOT NULL,
@@ -54,3 +56,5 @@ BEGIN
         count = (SELECT count FROM Gossips WHERE rowid = new.rowid)+1
       WHERE rowid = new.rowid;
 END;
+
+COMMIT;
