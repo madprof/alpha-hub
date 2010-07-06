@@ -16,9 +16,10 @@ A simple prototype for |ALPHA| Hub.
 from socket import socket, AF_INET, SOCK_DGRAM, gethostbyname
 from sqlite3 import connect, PARSE_DECLTYPES, Row
 from select import select
-import logging
 import hashlib
+import logging
 import os
+import platform
 
 def load_config(path):
     """
@@ -331,7 +332,11 @@ def main():
     Load config, setup, and teardown.
     """
     logging.info("starting |ALPHA| Hub prototype")
-    config = load_config(os.path.expanduser("~/.alphahub/config.py"))
+    config_path = {
+        'Linux': '~/.alphahub/config.py',
+        'Windows': '~/alphahub/config.py',
+    }[platform.system()]
+    config = load_config(os.path.expanduser(config_path))
     servers, upstream, downstream = open_sockets(config)
     logging.debug("bound and connected all sockets")
     database = open_database(config)
