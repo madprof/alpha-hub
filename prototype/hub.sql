@@ -1,3 +1,6 @@
+-- |ALPHA| Hub - an authorization server for alpha-ioq3
+-- See files README and COPYING for copyright and licensing details.
+
 -- create sqlite database for |ALPHA| Hub prototype
 
 BEGIN TRANSACTION;

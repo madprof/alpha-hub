@@ -1,3 +1,6 @@
+# |ALPHA| Hub - an authorization server for alpha-ioq3
+# See files README and COPYING for copyright and licensing details.
+
 """
 A simple prototype for |ALPHA| Hub.
 
@@ -182,20 +185,20 @@ def write_gossip(database, name, ip, guid, server, port, origin):
         origin, name, ip, guid, server, port
     )
     results = database.execute(
-                  """SELECT * FROM Gossip WHERE
+                  """SELECT * FROM Gossips WHERE
                      name=? AND ip=? AND guid=? AND server=? AND port=? AND
                      origin=?""",
                   (name, ip, guid, server, port, origin)
               ).fetchall()
     if len(results) == 0:
         database.execute(
-            """INSERT INTO Players (name, ip, guid, server, port, origin)
+            """INSERT INTO Gossips (name, ip, guid, server, port, origin)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (name, ip, guid, server, port, origin)
         )
     else:
         database.execute(
-            """UPDATE Players SET guid=? WHERE
+            """UPDATE Gossips SET guid=? WHERE
                name=? AND ip=? AND guid=? AND server=? AND port=? AND
                origin=?""",
             (guid, name, ip, guid, server, port, origin)
@@ -273,7 +276,7 @@ def handle_gossip(config, database, host, port, data):
         logging.debug("invalid md4 length")
         return
 
-    secret = config['servers'][host][1]
+    secret = config['upstream'][host][1]
     checksum = hashlib.new('md4', secret+'\n'+data).hexdigest()
     if md4 != checksum:
         logging.debug("invalid checksum (secrets probably don't match)")
@@ -287,7 +290,7 @@ def handle_gossip(config, database, host, port, data):
     var = parse_userinfo(data)
     origin = '%s:%s' % (host, port)
     host, port = var['server'].split(':')
-    write_gossip(database, var['name'], var['ip'], var['cl_guid'], host, port,
+    write_gossip(database, var['name'], var['ip'], var['guid'], host, port,
                  origin)
 
 def run(config, servers, upstream, downstream, database):
