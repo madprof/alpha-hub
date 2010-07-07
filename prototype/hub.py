@@ -13,13 +13,13 @@ A simple prototype for |ALPHA| Hub.
 # TODO: add "global" stuff to config as __private attributes
 # to reduce number of parameters passed around?
 
-from socket import socket, AF_INET, SOCK_DGRAM, gethostbyname, error
-from sqlite3 import connect, PARSE_DECLTYPES, Row
-from select import select
-import hashlib
-import logging
-import os
-import platform
+import hashlib as HASH
+import logging as L
+import os as OS
+import platform as PLAT
+import select as SEL
+import socket as S
+import sqlite3 as SQL
 
 def load_config(path):
     """
@@ -27,7 +27,7 @@ def load_config(path):
 
     Basic consistency checks, safe defaults for missing keys.
     """
-    logging.debug("loading config file '%s'", path)
+    L.debug("loading config file '%s'", path)
     default = {
         'host': 'localhost',
         'database': 'hub.db',
@@ -37,8 +37,8 @@ def load_config(path):
         '__name': 'default',
     }
     config = {}
-    if not os.path.exists(path):
-        logging.error("config file '%s' not found", path)
+    if not OS.path.exists(path):
+        L.error("config file '%s' not found", path)
         config = default
     else:
         execfile(path, globals(), config)
@@ -47,7 +47,7 @@ def load_config(path):
         config['servers'] = resolve_config(config['servers'])
         config['upstream'] = resolve_config(config['upstream'])
         config['downstream'] = resolve_config(config['downstream'])
-    logging.debug("loaded config file '%s'", path)
+    L.debug("loaded config file '%s'", path)
     return config
 
 def validate_config(config, default):
@@ -56,12 +56,12 @@ def validate_config(config, default):
     """
     for section in default:
         if section not in config:
-            logging.error("config file '%s' has no section '%s'",
-                          config['__name'], section)
+            L.error("config file '%s' has no section '%s'",
+                    config['__name'], section)
             config[section] = default[section]
         if type(config[section]) is not type(default[section]):
-            logging.error("config file '%s' section '%s' has wrong format",
-                          config['__name'], section)
+            L.error("config file '%s' section '%s' has wrong format",
+                    config['__name'], section)
             config[section] = default[section]
 
 def resolve_config(section):
@@ -75,9 +75,9 @@ def resolve_config(section):
     """
     resolved = {}
     for server in section:
-        ip = gethostbyname(server)
+        ip = S.gethostbyname(server)
         if ip != server:
-            logging.info("%s resolved to %s", server, ip)
+            L.info("%s resolved to %s", server, ip)
             assert ip not in resolved # no duplicates!
             resolved[ip] = section[server]
         else:
@@ -92,24 +92,22 @@ def open_sockets(config):
     host = config['host']
     servers = []
     for server, (port, _secret) in config['servers'].iteritems():
-        sock = socket(AF_INET, SOCK_DGRAM)
+        sock = S.socket(S.AF_INET, S.SOCK_DGRAM)
         sock.bind((host, port))
-        logging.debug("bound socket %s for server %s", sock.getsockname(),
-                      server)
+        L.debug("bound socket %s for server %s", sock.getsockname(), server)
         servers.append(sock)
     upstream = []
     for server, (port, _secret) in config['upstream'].iteritems():
-        sock = socket(AF_INET, SOCK_DGRAM)
+        sock = S.socket(S.AF_INET, S.SOCK_DGRAM)
         sock.bind((host, port))
-        logging.debug("bound socket %s for upstream %s", sock.getsockname(),
-                      server)
+        L.debug("bound socket %s for upstream %s", sock.getsockname(), server)
         upstream.append(sock)
     downstream = []
     for server, (port, _secret) in config['downstream'].iteritems():
-        sock = socket(AF_INET, SOCK_DGRAM)
+        sock = S.socket(S.AF_INET, S.SOCK_DGRAM)
         sock.connect((server, port))
-        logging.debug("connected socket %s for downstream %s",
-                      sock.getsockname(), sock.getpeername())
+        L.debug("connected socket %s for downstream %s",
+                sock.getsockname(), sock.getpeername())
         downstream.append(sock)
     return servers, upstream, downstream
 
@@ -118,22 +116,22 @@ def close_sockets(servers, upstream, downstream):
     Close all sockets.
     """
     for sock in servers+upstream+downstream:
-        logging.debug("closing socket %s", sock.getsockname())
+        L.debug("closing socket %s", sock.getsockname())
         sock.close()
 
 def open_database(config):
     """
     Open database.
     """
-    conn = connect(config['database'], detect_types=PARSE_DECLTYPES)
-    conn.row_factory = Row
+    conn = SQL.connect(config['database'], detect_types=SQL.PARSE_DECLTYPES)
+    conn.row_factory = SQL.Row
     conn.text_factory = str
     with open("hub.sql") as script_file:
         script = script_file.read()
         conn.executescript(script)
         # TODO: would love to detect if we created a new database
         # here but can't due to sqlite interface limitations?
-    logging.debug("opened database '%s'", config['database'])
+    L.debug("opened database '%s'", config['database'])
     return conn
 
 def close_database(conn):
@@ -142,7 +140,7 @@ def close_database(conn):
     """
     conn.commit()
     conn.close()
-    logging.debug("closed database")
+    L.debug("closed database")
 
 def write_player(database, name, ip, guid, server, port):
     """
@@ -151,7 +149,7 @@ def write_player(database, name, ip, guid, server, port):
     If the record exists already, we fake an update
     to get "last" updated by the database trigger.
     """
-    logging.info(
+    L.info(
         "recording %s from ip %s with guid %s playing on %s:%s",
         name, ip, guid, server, port
     )
@@ -181,7 +179,7 @@ def write_gossip(database, name, ip, guid, server, port, origin):
     If the record exists already, we fake an update
     to get "last" and "count" updated by the database trigger.
     """
-    logging.info(
+    L.info(
         "gossip from %s: recording %s from ip %s with guid %s playing on %s:%s",
         origin, name, ip, guid, server, port
     )
@@ -226,23 +224,23 @@ def handle_userinfo(config, database, downstream, host, port, data):
     """
     header, data = data[0:4], data[4:]
     if header != '\xff\xff\xff\xff':
-        logging.debug("invalid packet header")
+        L.debug("invalid packet header")
         return
 
     md4, data = data.split('\n', 1)
     if len(md4) != 32:
-        logging.debug("invalid md4 length")
+        L.debug("invalid md4 length")
         return
 
     secret = config['servers'][host][1]
-    checksum = hashlib.new('md4', secret+'\n'+data).hexdigest()
+    checksum = HASH.new('md4', secret+'\n'+data).hexdigest()
     if md4 != checksum:
-        logging.debug("invalid checksum (secrets probably don't match)")
+        L.debug("invalid checksum (secrets probably don't match)")
         return
 
     kind, data = data.split('\n', 1)
     if kind != 'userinfo':
-        logging.debug("not a userinfo packet")
+        L.debug("not a userinfo packet")
         return
 
     var = parse_userinfo(data)
@@ -254,22 +252,22 @@ def echo_downstream(config, downstream, host, port, var):
     """
     Send gossip to downstream hubs.
     """
-    logging.debug("echoing packet from %s:%s...", host, port)
+    L.debug("echoing packet from %s:%s...", host, port)
     payload = 'gossip player\n\\server\\%s:%s\\name\\%s\\ip\\%s\\guid\\%s' % (
         host, port, var['name'], var['ip'], var['cl_guid'])
     for out in downstream:
-        logging.debug("...to downstream %s", out.getpeername())
+        L.debug("...to downstream %s", out.getpeername())
         secret = config['downstream'][out.getpeername()[0]][1]
-        md4 = hashlib.new('md4', secret+'\n'+payload).hexdigest()
+        md4 = HASH.new('md4', secret+'\n'+payload).hexdigest()
         packet = md4+'\n'+payload
         try:
             # NOTE: using out.send(packet) will fail too if the other
             # side is not there; strange since the docs say it should
             # just keep on truckin'
             out.sendall(packet)
-        except error as exc:
-            logging.warning("...sendall() failed with %s for %s", exc,
-                            out.getpeername())
+        except S.error as exc:
+            L.warning("...sendall() failed with %s for %s", exc,
+                      out.getpeername())
 
 def handle_gossip(config, database, host, port, data):
     """
@@ -281,18 +279,18 @@ def handle_gossip(config, database, host, port, data):
     """
     md4, data = data.split('\n', 1)
     if len(md4) != 32:
-        logging.debug("invalid md4 length")
+        L.debug("invalid md4 length")
         return
 
     secret = config['upstream'][host][1]
-    checksum = hashlib.new('md4', secret+'\n'+data).hexdigest()
+    checksum = HASH.new('md4', secret+'\n'+data).hexdigest()
     if md4 != checksum:
-        logging.debug("invalid checksum (secrets probably don't match)")
+        L.debug("invalid checksum (secrets probably don't match)")
         return
 
     kind, data = data.split('\n', 1)
     if kind != 'gossip player':
-        logging.debug("not a gossip player packet")
+        L.debug("not a gossip player packet")
         return
 
     var = parse_userinfo(data)
@@ -306,22 +304,22 @@ def run(config, servers, upstream, downstream, database):
     Receive and handle packets from all our sockets.
     """
     while True:
-        logging.debug("sleeping in select")
-        ready, _, _ = select(servers+upstream, [], [])
-        logging.debug("woke up for %s socket(s)", len(ready))
+        L.debug("sleeping in select")
+        ready, _, _ = SEL.select(servers+upstream, [], [])
+        L.debug("woke up for %s socket(s)", len(ready))
         for sock in ready:
             packet, (host, port) = sock.recvfrom(4096)
-            logging.debug("received packet from %s:%s", host, port)
+            L.debug("received packet from %s:%s", host, port)
             if host in config['servers']:
-                logging.debug("processing server packet from %s:%s", host, port)
+                L.debug("processing server packet from %s:%s", host, port)
                 handle_userinfo(config, database, downstream, host, port,
                                 packet)
             elif host in config['upstream']:
-                logging.debug("processing upstream packet from %s:%s", host,
+                L.debug("processing upstream packet from %s:%s", host,
                               port)
                 handle_gossip(config, database, host, port, packet)
             else:
-                logging.debug("ignored spurious packet from %s:%s", host, port)
+                L.debug("ignored spurious packet from %s:%s", host, port)
 
 def safe_run(config, servers, upstream, downstream, database):
     """
@@ -330,7 +328,7 @@ def safe_run(config, servers, upstream, downstream, database):
     try:
         run(config, servers, upstream, downstream, database)
     except Exception as exc:
-        logging.exception("terminated by exception %s", exc)
+        L.exception("terminated by exception %s", exc)
 
 def main():
     """
@@ -338,22 +336,22 @@ def main():
 
     Load config, setup, and teardown.
     """
-    logging.info("starting |ALPHA| Hub prototype")
+    L.info("starting |ALPHA| Hub prototype")
     config_path = {
         'Linux': '~/.alphahub/config.py',
         'Windows': '~/alphahub/config.py',
-    }[platform.system()]
-    config = load_config(os.path.expanduser(config_path))
+    }[PLAT.system()]
+    config = load_config(OS.path.expanduser(config_path))
     servers, upstream, downstream = open_sockets(config)
-    logging.debug("bound and connected all sockets")
+    L.debug("bound and connected all sockets")
     database = open_database(config)
     safe_run(config, servers, upstream, downstream, database)
-    logging.info("stopping |ALPHA| Hub prototype")
+    L.info("stopping |ALPHA| Hub prototype")
     close_database(database)
     close_sockets(servers, upstream, downstream)
-    logging.debug("closed all sockets")
+    L.debug("closed all sockets")
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG,
-                        format="%(asctime)s - %(levelname)s - %(message)s")
+    L.basicConfig(level=L.DEBUG,
+                  format="%(asctime)s - %(levelname)s - %(message)s")
     main()
