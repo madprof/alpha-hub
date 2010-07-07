@@ -43,101 +43,112 @@ import logging as L
 import Queue as Q
 import threading as T
 
+class _Worker(T.Thread):
+    """Worker thread, don't instantiate directly!"""
+
+    def __init__(self, task_queue, init_local=None):
+        """Initialize and start a new worker."""
+        super(_Worker, self).__init__()
+        assert isinstance(task_queue, Q.Queue)
+        assert init_local is None or callable(init_local)
+        self.__task_queue = task_queue
+        self.__init_local = init_local
+        self.daemon = True
+        self.start()
+
+    def run(self):
+        """Worker thread main loop."""
+        storage = self.__make_local()
+        self.__run_forever(storage)
+
+    def __make_local(self):
+        """Create and initialize thread-local storage."""
+        storage = T.local()
+        if self.__init_local is not None:
+            self.__init_local(storage)
+        return storage
+
+    def __run_forever(self, storage):
+        """Grab the next task and run it."""
+        while True:
+            task = self.__task_queue.get()
+            self.__run_task(task, storage)
+            self.__task_queue.task_done()
+
+    def __run_task(self, task, storage):
+        """Run a single task."""
+        func, args, kwargs = task
+        required_args, _, _, _ = I.getargspec(func)
+        try:
+            if '_tp_local' in required_args:
+                func(_tp_local=storage, *args, **kwargs)
+            else:
+                func(*args, **kwargs)
+        except Exception as exc:
+            L.exception(
+                "exception %s during %s ignored by thread pool",
+                exc, func
+            )
+
 class ThreadPool(object):
-    """
-    The thread pool.
-    """
+    """The thread pool."""
+
     def __init__(self, num_threads=4, max_tasks=16, timeout=32,
                  init_local=None, stack_size=None):
         """
-        Create a new thread pool.
+        Initialize and start a new thread pool.
 
-        Exactly num_threads will be spawned on start(). At most
-        max_tasks can be queued at a time before add() blocks;
-        add() blocks for at most timeout seconds before raising
-        an exception.
+        Exactly num_threads will be spawned. At most max_tasks
+        can be queued before add() blocks; add() blocks for at
+        most timeout seconds before raising an exception.
 
-        You can pass a callable with one argument to init_local
+        You can pass a callable with one argument as init_local
         to initialize thread-local storage for each thread; see
         add() below for how to access thread-local storage from
         your tasks. For example:
 
-        import sqlite3
-        ...
-        def init_local(local):
-            local.connection = sqlite3.connect("some.db")
-        ...
-        pool = ThreadPool(init_local=init_local)
+            import sqlite3
+            ...
+            def init_local(local):
+                local.connection = sqlite3.connect("some.db")
+            ...
+            pool = ThreadPool(init_local=init_local)
         """
         assert num_threads > 0
         assert max_tasks > 0
-        assert timeout >= 1
+        assert timeout > 0
         # TODO: undocumented and probably a very bad idea
         assert stack_size is None or stack_size > 16*4096
         if stack_size is not None:
             T.stack_size(stack_size)
         self.__queue = Q.Queue(max_tasks)
         self.__timeout = timeout
-        self.__running = False
-        self.__workers = []
-        self.__init_local = init_local
         for _ in range(num_threads):
-            worker = T.Thread(target=self.__wait_for_work)
-            worker.daemon = True
-            self.__workers.append(worker)
+            _Worker(self.__queue, init_local)
 
-    def __wait_for_work(self):
-        """
-        Threads grab tasks and run them here.
-        """
-        storage = T.local()
-        if self.__init_local is not None:
-            self.__init_local(storage)
-        while True:
-            call, args, kwargs = self.__queue.get()
-            required_args, _, _, _ = I.getargspec(call)
-            try:
-                if '_tp_local' in required_args:
-                    call(_tp_local=storage, *args, **kwargs)
-                else:
-                    call(*args, **kwargs)
-            except Exception as exc:
-                L.exception(
-                    "exception %s during %s(%s,%s) ignored by thread pool",
-                    exc, call, args, kwargs
-                )
-
-    def add(self, call, *args, **kwargs):
+    def add(self, func, *args, **kwargs):
         """
         Add a task.
 
-        Raises exception if we have not started yet but the
-        queue is full; if we have started and the queue is
-        full add() will block for a while before raising an
-        exception (the idea being that all threads are stuck
-        and therefore we better get out now).
+        A task consists of a callable func and arguments for
+        func. For example:
 
-        You can access thread-local storage in your callable
-        by requiring the special argument "_tp_local":
+            def task(some, argu, ments=None):
+                ...
+            pool.add(task, act, ual, ments=parameters)
 
-        def task(some, arg, u, ment, _tp_local):
-            _tp_local.connection.rollback()
+        You can access thread-local storage by requiring the
+        special "_tp_local" argument for func. For example:
+
+            def task(_tp_local, some, argu, ments=None):
+                _tp_local.connection.rollback()
+                ...
+                _tp_local.connection.commit()
             ...
-            _tp_local.connection.commit()
-        ...
-        pool.add(task, some, arg, u, ment)
+            pool.add(task, act, ual, ments=parameters)
         """
-        if not self.__running:
-            assert not self.__queue.full()
-        self.__queue.put((call, args, kwargs), True, self.__timeout)
-
-    def start(self):
-        """
-        Start the thread pool.
-        """
-        for worker in self.__workers:
-            worker.start()
-        self.__running = True
+        assert callable(func)
+        self.__queue.put((func, args, kwargs), True, self.__timeout)
 
 def test():
     """Simple example and test case."""
@@ -148,6 +159,7 @@ def test():
         """A silly local. :-D"""
         local.x = uniform(0, 1)
         local.y = 0
+        L.info("init_local local.x %s", local.x)
     def task(number, _tp_local):
         """A silly task. :-D"""
         L.info("task %s thread local.x %s", number, _tp_local.x)
@@ -158,7 +170,6 @@ def test():
         L.info("thread %s has finished %s tasks", _tp_local.x, _tp_local.y)
 
     pool = ThreadPool(init_local=init_local)
-    pool.start()
     L.info("starting to add tasks to pool")
     for i in range(32):
         pool.add(task, i)
