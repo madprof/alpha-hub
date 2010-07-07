@@ -352,6 +352,8 @@ def main():
     L.debug("closed all sockets")
 
 if __name__ == "__main__":
-    L.basicConfig(level=L.DEBUG,
-                  format="%(asctime)s - %(levelname)s - %(message)s")
+    L.basicConfig(
+        level=L.DEBUG,
+        format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s"
+    )
     main()
