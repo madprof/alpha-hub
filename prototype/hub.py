@@ -13,7 +13,7 @@ A simple prototype for |ALPHA| Hub.
 # TODO: add "global" stuff to config as __private attributes
 # to reduce number of parameters passed around?
 
-from socket import socket, AF_INET, SOCK_DGRAM, gethostbyname
+from socket import socket, AF_INET, SOCK_DGRAM, gethostbyname, error
 from sqlite3 import connect, PARSE_DECLTYPES, Row
 from select import select
 import hashlib
@@ -262,7 +262,14 @@ def echo_downstream(config, downstream, host, port, var):
         secret = config['downstream'][out.getpeername()[0]][1]
         md4 = hashlib.new('md4', secret+'\n'+payload).hexdigest()
         packet = md4+'\n'+payload
-        out.sendall(packet)
+        try:
+            # NOTE: using out.send(packet) will fail too if the other
+            # side is not there; strange since the docs say it should
+            # just keep on truckin'
+            out.sendall(packet)
+        except error as exc:
+            logging.warning("...sendall() failed with %s for %s", exc,
+                            out.getpeername())
 
 def handle_gossip(config, database, host, port, data):
     """
