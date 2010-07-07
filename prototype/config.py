@@ -29,14 +29,14 @@ servers = {
 # game servers for now; we probably need more stuff here,
 # rate limits, trust levels, and so on
 
-upstream = {
+listen = {
     "some.hub.server.tld": (9533, "youcantknow"),
 }
 
-# the hubs we send gossip to; same restrictions as for game
-# servers for now; same notes as for upstream hubs apply
+# the hubs we tell gossip to; same restrictions as for game
+# servers for now; same notes as for listen hubs apply
 
-downstream = {
+tell = {
     "some.hub.server.tld": (453, "secretsofdoom"),
     "another.hub.tld": (12345, "itssofun"),
 }

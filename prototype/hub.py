@@ -32,8 +32,8 @@ def load_config(path):
         'host': 'localhost',
         'database': 'hub.db',
         'servers': {},
-        'upstream': {},
-        'downstream': {},
+        'listen': {},
+        'tell': {},
         '__name': 'default',
     }
     config = {}
@@ -45,8 +45,8 @@ def load_config(path):
         config['__name'] = path
         validate_config(config, default)
         config['servers'] = resolve_config(config['servers'])
-        config['upstream'] = resolve_config(config['upstream'])
-        config['downstream'] = resolve_config(config['downstream'])
+        config['listen'] = resolve_config(config['listen'])
+        config['tell'] = resolve_config(config['tell'])
     L.debug("loaded config file '%s'", path)
     return config
 
@@ -96,26 +96,26 @@ def open_sockets(config):
         sock.bind((host, port))
         L.debug("bound socket %s for server %s", sock.getsockname(), server)
         servers.append(sock)
-    upstream = []
-    for server, (port, _secret) in config['upstream'].iteritems():
+    listen = []
+    for server, (port, _secret) in config['listen'].iteritems():
         sock = S.socket(S.AF_INET, S.SOCK_DGRAM)
         sock.bind((host, port))
-        L.debug("bound socket %s for upstream %s", sock.getsockname(), server)
-        upstream.append(sock)
-    downstream = []
-    for server, (port, _secret) in config['downstream'].iteritems():
+        L.debug("bound socket %s for listen %s", sock.getsockname(), server)
+        listen.append(sock)
+    tell = []
+    for server, (port, _secret) in config['tell'].iteritems():
         sock = S.socket(S.AF_INET, S.SOCK_DGRAM)
         sock.connect((server, port))
-        L.debug("connected socket %s for downstream %s",
+        L.debug("connected socket %s for tell %s",
                 sock.getsockname(), sock.getpeername())
-        downstream.append(sock)
-    return servers, upstream, downstream
+        tell.append(sock)
+    return servers, listen, tell
 
-def close_sockets(servers, upstream, downstream):
+def close_sockets(servers, listen, tell):
     """
     Close all sockets.
     """
-    for sock in servers+upstream+downstream:
+    for sock in servers+listen+tell:
         L.debug("closing socket %s", sock.getsockname())
         sock.close()
 
@@ -214,7 +214,7 @@ def parse_userinfo(userinfo):
     values = data[1::2]
     return dict(zip(keys, values))
 
-def handle_userinfo(config, database, downstream, host, port, data):
+def handle_userinfo(config, database, tell, host, port, data):
     """
     Handle a userinfo packet.
 
@@ -245,19 +245,19 @@ def handle_userinfo(config, database, downstream, host, port, data):
 
     var = parse_userinfo(data)
     write_player(database, var['name'], var['ip'], var['cl_guid'], host, port)
-    if len(downstream) > 0:
-        echo_downstream(config, downstream, host, port, var)
+    if len(tell) > 0:
+        echo_tell(config, tell, host, port, var)
 
-def echo_downstream(config, downstream, host, port, var):
+def echo_tell(config, tell, host, port, var):
     """
-    Send gossip to downstream hubs.
+    Send gossip to tell hubs.
     """
     L.debug("echoing packet from %s:%s...", host, port)
     payload = 'gossip player\n\\server\\%s:%s\\name\\%s\\ip\\%s\\guid\\%s' % (
         host, port, var['name'], var['ip'], var['cl_guid'])
-    for out in downstream:
-        L.debug("...to downstream %s", out.getpeername())
-        secret = config['downstream'][out.getpeername()[0]][1]
+    for out in tell:
+        L.debug("...to tell %s", out.getpeername())
+        secret = config['tell'][out.getpeername()[0]][1]
         md4 = HASH.new('md4', secret+'\n'+payload).hexdigest()
         packet = md4+'\n'+payload
         try:
@@ -282,7 +282,7 @@ def handle_gossip(config, database, host, port, data):
         L.debug("invalid md4 length")
         return
 
-    secret = config['upstream'][host][1]
+    secret = config['listen'][host][1]
     checksum = HASH.new('md4', secret+'\n'+data).hexdigest()
     if md4 != checksum:
         L.debug("invalid checksum (secrets probably don't match)")
@@ -299,34 +299,34 @@ def handle_gossip(config, database, host, port, data):
     write_gossip(database, var['name'], var['ip'], var['guid'], host, port,
                  origin)
 
-def run(config, servers, upstream, downstream, database):
+def run(config, servers, listen, tell, database):
     """
     Receive and handle packets from all our sockets.
     """
     while True:
         L.debug("sleeping in select")
-        ready, _, _ = SEL.select(servers+upstream, [], [])
+        ready, _, _ = SEL.select(servers+listen, [], [])
         L.debug("woke up for %s socket(s)", len(ready))
         for sock in ready:
             packet, (host, port) = sock.recvfrom(4096)
             L.debug("received packet from %s:%s", host, port)
             if host in config['servers']:
                 L.debug("processing server packet from %s:%s", host, port)
-                handle_userinfo(config, database, downstream, host, port,
+                handle_userinfo(config, database, tell, host, port,
                                 packet)
-            elif host in config['upstream']:
-                L.debug("processing upstream packet from %s:%s", host,
+            elif host in config['listen']:
+                L.debug("processing listen packet from %s:%s", host,
                               port)
                 handle_gossip(config, database, host, port, packet)
             else:
                 L.debug("ignored spurious packet from %s:%s", host, port)
 
-def safe_run(config, servers, upstream, downstream, database):
+def safe_run(config, servers, listen, tell, database):
     """
     Wrapper around run() to catch exceptions.
     """
     try:
-        run(config, servers, upstream, downstream, database)
+        run(config, servers, listen, tell, database)
     except Exception as exc:
         L.exception("terminated by exception %s", exc)
 
@@ -342,13 +342,13 @@ def main():
         'Windows': '~/alphahub/config.py',
     }[PLAT.system()]
     config = load_config(OS.path.expanduser(config_path))
-    servers, upstream, downstream = open_sockets(config)
+    servers, listen, tell = open_sockets(config)
     L.debug("bound and connected all sockets")
     database = open_database(config)
-    safe_run(config, servers, upstream, downstream, database)
+    safe_run(config, servers, listen, tell, database)
     L.info("stopping |ALPHA| Hub prototype")
     close_database(database)
-    close_sockets(servers, upstream, downstream)
+    close_sockets(servers, listen, tell)
     L.debug("closed all sockets")
 
 if __name__ == "__main__":
