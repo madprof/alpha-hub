@@ -13,6 +13,13 @@ A simple prototype for |ALPHA| Hub.
 # TODO: add "global" stuff to config as __private attributes
 # to reduce number of parameters passed around?
 
+# TODO: track thread-local database connections; use cleanup
+# to interrupt() each, then close() it? may not be too nice,
+# we'd have to call close() from the main thread OR we need
+# to catch the interrupt-exception (and which one is that???)
+# in the thread and close() there assuming that we'll die for
+# sure since the main thread will exit; messy, messy, messy
+
 import hashlib as HASH
 import logging as L
 import os as OS
@@ -20,6 +27,8 @@ import platform as PLAT
 import select as SEL
 import socket as S
 import sqlite3 as SQL
+
+import pool as POOL
 
 def load_config(path):
     """
@@ -298,27 +307,44 @@ def handle_gossip(config, database, host, port, data):
     write_gossip(database, var['name'], var['ip'], var['guid'], host, port,
                  origin)
 
+def handle_packet(packet, host, port, _tp_local):
+    """Examine a packet and figure out what to do."""
+    loc = _tp_local
+    if host in loc.config['servers']:
+        L.debug("processing server packet from %s:%s", host, port)
+        handle_userinfo(loc.config, loc.database, loc.tell, host, port, packet)
+    elif host in loc.config['listen']:
+        L.debug("processing listen packet from %s:%s", host, port)
+        handle_gossip(loc.config, loc.database, host, port, packet)
+    else:
+        L.debug("ignored spurious packet from %s:%s", host, port)
+
 def run(config, servers, listen, tell, database):
     """
     Receive and handle packets from all our sockets.
     """
+    def thread_open_database(local):
+        """Helper to create thread-local storage."""
+        local.database = open_database(config)
+        local.config = config
+        local.servers = servers
+        local.listen = listen
+        local.tell = tell
+
+    pool = POOL.ThreadPool(init_local=thread_open_database)
     while True:
         L.debug("sleeping in select")
         ready, _, _ = SEL.select(servers+listen, [], [])
         L.debug("woke up for %s socket(s)", len(ready))
         for sock in ready:
+            # TODO: could pass sock to thread and read there, but
+            # what are the implications of going back into select
+            # while another thread could still be reading? seems
+            # safer to just read here (although that costs time)
+            # and put the handling off into a thread instead
             packet, (host, port) = sock.recvfrom(4096)
             L.debug("received packet from %s:%s", host, port)
-            if host in config['servers']:
-                L.debug("processing server packet from %s:%s", host, port)
-                handle_userinfo(config, database, tell, host, port,
-                                packet)
-            elif host in config['listen']:
-                L.debug("processing listen packet from %s:%s", host,
-                              port)
-                handle_gossip(config, database, host, port, packet)
-            else:
-                L.debug("ignored spurious packet from %s:%s", host, port)
+            pool.add(handle_packet, packet, host, port)
 
 def safe_run(config, servers, listen, tell, database):
     """
