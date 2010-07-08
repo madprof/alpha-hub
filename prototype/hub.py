@@ -84,7 +84,14 @@ def resolve_config(section):
     """
     resolved = {}
     for server in section:
-        ip = S.gethostbyname(server)
+        try:
+            ip = S.gethostbyname(server)
+        except S.gaierror as exc:
+            L.exception("failed to resolve %s because of %s",
+                        server, exc)
+            # TODO: could "continue" here to remove the whole
+            # thing from the config? what's better?
+            ip = server
         if ip != server:
             L.info("%s resolved to %s", server, ip)
             assert ip not in resolved # no duplicates!
