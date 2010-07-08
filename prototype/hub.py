@@ -120,25 +120,24 @@ def close_sockets(servers, listen, tell):
         sock.close()
 
 def open_database(config):
-    """
-    Open database.
-    """
-    conn = SQL.connect(config['database'], detect_types=SQL.PARSE_DECLTYPES)
+    """Open database connection."""
+    conn = SQL.connect(config['database'], timeout=16,
+                       detect_types=SQL.PARSE_DECLTYPES)
     conn.row_factory = SQL.Row
     conn.text_factory = str
-    with open("hub.sql") as script_file:
-        script = script_file.read()
-        conn.executescript(script)
-        # TODO: would love to detect if we created a new database
-        # here but can't due to sqlite interface limitations?
     L.debug("opened database '%s'", config['database'])
     return conn
 
+def create_tables(conn):
+    """Create database tables (unless they exist already)."""
+    with open("hub.sql") as script_file:
+        script = script_file.read()
+        conn.executescript(script)
+        # TODO: would love to detect if we actually created
+        # tables here but can't due to sqlite3 interface?
+
 def close_database(conn):
-    """
-    Close database.
-    """
-    conn.commit()
+    """Close database connection."""
     conn.close()
     L.debug("closed database")
 
@@ -327,7 +326,7 @@ def safe_run(config, servers, listen, tell, database):
     """
     try:
         run(config, servers, listen, tell, database)
-    except Exception as exc:
+    except BaseException as exc:
         L.exception("terminated by exception %s", exc)
 
 def main():
@@ -345,6 +344,7 @@ def main():
     servers, listen, tell = open_sockets(config)
     L.debug("bound and connected all sockets")
     database = open_database(config)
+    create_tables(database)
     safe_run(config, servers, listen, tell, database)
     L.info("stopping |ALPHA| Hub prototype")
     close_database(database)
