@@ -234,8 +234,7 @@ def handle_userinfo(config, database, tell, host, port, data):
     Handle a userinfo packet.
 
     Checks packet structure, MD4 checksum, etc. and eventually
-    writes the player record. Returns false if we rejected the
-    packet as invalid, true if we accepted it.
+    writes the player record.
     """
     header, data = data[0:4], data[4:]
     if header != '\xff\xff\xff\xff':
@@ -289,8 +288,7 @@ def handle_gossip(config, database, host, port, data):
     Handle a gossip packet.
 
     Checks packet structure, MD4 checksum, etc. and eventually
-    writes the gossip record. Returns false if we rejected the
-    packet as invalid, true if we accepted it.
+    writes the gossip record.
     """
     md4, data = data.split('\n', 1)
     if len(md4) != 32:
