@@ -326,7 +326,7 @@ def handle_packet(packet, host, port, _tp_local):
     else:
         L.debug("ignored spurious packet from %s:%s", host, port)
 
-def run(config, servers, listen, tell, database):
+def run(config, servers, listen, tell):
     """
     Receive and handle packets from all our sockets.
     """
@@ -353,12 +353,12 @@ def run(config, servers, listen, tell, database):
             L.debug("received packet from %s:%s", host, port)
             pool.add(handle_packet, packet, host, port)
 
-def safe_run(config, servers, listen, tell, database):
+def safe_run(config, servers, listen, tell):
     """
     Wrapper around run() to catch exceptions.
     """
     try:
-        run(config, servers, listen, tell, database)
+        run(config, servers, listen, tell)
     except BaseException as exc:
         L.exception("terminated by exception %s", exc)
 
@@ -378,7 +378,7 @@ def main():
     L.debug("bound and connected all sockets")
     database = open_database(config)
     create_tables(database)
-    safe_run(config, servers, listen, tell, database)
+    safe_run(config, servers, listen, tell)
     L.info("stopping |ALPHA| Hub prototype")
     close_database(database)
     close_sockets(servers, listen, tell)
