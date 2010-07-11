@@ -43,6 +43,12 @@ import logging as L
 import Queue as Q
 import threading as T
 
+class _NullHandler(L.Handler):
+    """Logging handler that does nothing."""
+    def emit(self, _record):
+        pass
+L.getLogger("com.urbanban.threading.throwaway.pool").addHandler(_NullHandler())
+
 class _Worker(T.Thread):
     """Worker thread, don't instantiate directly!"""
 
