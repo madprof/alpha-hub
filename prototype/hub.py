@@ -141,6 +141,10 @@ def open_database(config):
                        detect_types=SQL.PARSE_DECLTYPES)
     conn.row_factory = SQL.Row
     conn.text_factory = str
+    conn.execute("PRAGMA foreign_keys = ON")
+    foreign = conn.execute("PRAGMA foreign_keys").fetchall()
+    assert len(foreign) == 1
+    assert foreign[0][0] == 1
     L.debug("opened database '%s'", config['database'])
     return conn
 
